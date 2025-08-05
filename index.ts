@@ -29,7 +29,7 @@ const normalProvider = new ethers.JsonRpcProvider(normalRpc);
 const funderAuthSigner = new ethers.Wallet(funderKey, normalProvider);
 const compromisedAuthSigner = new ethers.Wallet(compromisedKey, normalProvider);
 
-const erc20Contract = new ethers.Contract(erc20TokenAddress, erc20Abi, normalProvider);
+const erc20Contract = new ethers.Contract(erc20TokenAddress, erc20Abi, compromisedAuthSigner);
 
 const compromisedAddress = compromisedAuthSigner.address;
 const funderAddress = funderAuthSigner.address;
@@ -73,7 +73,7 @@ const trx1 = {
 // trx 2: send ERC20 to compromised address
 
 const populatedTransaction = await erc20Contract.transfer?.populateTransaction(
-    compromisedAddress,
+    funderAddress,
     balance,
     { maxFeePerGas: maxFeePerGas, maxPriorityFeePerGas: maxPriorityFeePerGas, chainId: 1, nonce: compromisedNonce, type: 2 }
 ) as TransactionRequest;
