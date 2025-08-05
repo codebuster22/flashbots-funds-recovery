@@ -3,8 +3,16 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "tsx index.ts",
+    "dev": "tsx watch index.ts"
+  },
+  "ts-node": {
+    "esm": true
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "tsx": "^4.20.3"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -12,6 +20,7 @@
   "dependencies": {
     "@flashbots/ethers-provider-bundle": "^1.0.0",
     "dotenv": "^17.2.1",
-    "ethers": "6.7.1"
+    "ethers": "6.7.1",
+    "ts-node": "^10.9.2"
   }
 }
