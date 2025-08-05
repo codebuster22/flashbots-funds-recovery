@@ -1,12 +1,14 @@
-import { ethers } from "ethers";
+import { ethers, parseUnits } from "ethers";
 import { FlashbotsBundleProvider } from "@flashbots/ethers-provider-bundle";
 import { erc20Abi } from "./erc20Abi";
 import dotenv from "dotenv";
+import type { TransactionRequest } from "ethers";
 
 dotenv.config();
 
-const normalRpc = "";
+const normalRpc = process.env.NORMAL_RPC;
 const ETH_AMOUNT_TO_FUND = process.env.ETH_AMOUNT_TO_FUND || "0.001";
+const baseGasPrice = parseUnits(process.env.BASE_GAS_PRICE as string, "gwei") || parseUnits("10", "gwei");
 const flashbotsRpc = process.env.FLASHBOTS_RPC;
 const funderKey = process.env.FUNDER_PRIVATE_KEY;
 const compromisedKey = process.env.COMPROMISED_PRIVATE_KEY;
@@ -20,7 +22,7 @@ if (!erc20TokenAddress) {
     throw new Error("ERC20_TOKEN_ADDRESS must be set");
 }
 
-const normalProvider = new ethers.providers.JsonRpcProvider(normalRpc);
+const normalProvider = new ethers.JsonRpcProvider(normalRpc);
 
 const funderAuthSigner = new ethers.Wallet(funderKey);
 const compromisedAuthSigner = new ethers.Wallet(compromisedKey);
@@ -40,10 +42,9 @@ const flashbotsProvider = await FlashbotsBundleProvider.create(
 
 // trx 1: fund ETH to compromised address
 // Get current gas price and multiply by 3 for all transactions
-const baseGasPrice = await normalProvider.getGasPrice();
-const txGasPrice = baseGasPrice.mul(3);
+const txGasPrice = baseGasPrice * 3n;
 
-const ethAmountToSend = ethers.utils.parseEther(ETH_AMOUNT_TO_FUND); // Set X value in ETH here
+const ethAmountToSend = parseUnits(ETH_AMOUNT_TO_FUND, "ether"); // Set X value in ETH here
 
 const fundEthPopulatedTx = await funderAuthSigner.populateTransaction({
     to: compromisedAddress,
@@ -57,11 +58,12 @@ const trx1 = {
 }
 
 // trx 2: send ERC20 to compromised address
-const populatedTransaction = await erc20Contract.populateTransaction.transfer(
+
+const populatedTransaction = await erc20Contract.transfer?.populateTransaction(
     compromisedAddress,
     balance,
     { gasPrice: txGasPrice }
-);
+) as TransactionRequest;
 
 console.log(populatedTransaction);
 
@@ -74,10 +76,10 @@ const trx2 = {
 const compromisedEthBalance = await normalProvider.getBalance(compromisedAddress);
 
 // Estimate gas for sending ETH back to funder
-const gasLimit = 21000; // Standard ETH transfer
+const gasLimit = 21000n; // Standard ETH transfer
 
 // Calculate max amount to send (subtract gas cost)
-const maxEthToSendBack = compromisedEthBalance.sub(txGasPrice.mul(gasLimit));
+const maxEthToSendBack = compromisedEthBalance - (txGasPrice * gasLimit);
 
 const sendEthBackPopulatedTx = await compromisedAuthSigner.populateTransaction({
     to: funderAddress,
