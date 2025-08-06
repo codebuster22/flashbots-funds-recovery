@@ -19,8 +19,10 @@
   },
   "dependencies": {
     "@flashbots/ethers-provider-bundle": "^1.0.0",
+    "axios": "^1.11.0",
     "dotenv": "^17.2.1",
     "ethers": "6.7.1",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "zod": "^4.0.15"
   }
 }
