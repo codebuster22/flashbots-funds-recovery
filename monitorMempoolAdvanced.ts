@@ -1,11 +1,13 @@
-import { MempoolEventManager } from './src/monitoring/eventManager';
+import { ThreePhaseEventManager } from './src/monitoring/eventManager';
 import { AlertLogger } from './src/monitoring/alertLogger';
 import { 
     websocketRpc, 
     compromisedAddress, 
     erc20TokenAddress, 
     proxyContractAddress,
-    proxyAdminAddress 
+    proxyAdminAddress,
+    safeAddress,
+    safeApiBaseUrl 
 } from './config';
 
 console.log("🚀 Starting Advanced Event-Driven Flashbots Mempool Monitor");
@@ -17,16 +19,20 @@ console.log(`   Compromised Address: ${compromisedAddress}`);
 console.log(`   ERC20 Token: ${erc20TokenAddress}`);
 console.log(`   Proxy Contract: ${proxyContractAddress}`);
 console.log(`   Proxy Admin: ${proxyAdminAddress || 'Auto-detect'}`);
+console.log(`   Safe Address: ${safeAddress}`);
+console.log(`   Safe API Base URL: ${safeApiBaseUrl}`);
 console.log(`   ERC20 Methods: transfer, transferFrom, approve, setApproval`);
 console.log(`   Upgrade Methods: upgradeTo, upgradeToAndCall, changeAdmin`);
 console.log("");
 
-const eventManager = new MempoolEventManager(
+const eventManager = new ThreePhaseEventManager(
     websocketRpc,
     compromisedAddress,
     erc20TokenAddress,
     proxyContractAddress,
-    proxyAdminAddress
+    proxyAdminAddress,
+    safeAddress,
+    safeApiBaseUrl
 );
 
 // Setup additional event listeners for monitoring insights
@@ -53,10 +59,13 @@ async function startAdvancedMonitoring(): Promise<void> {
         await eventManager.start();
         
         AlertLogger.logInfo("");
-        AlertLogger.logInfo("🎯 ADVANCED MONITORING ACTIVE:");
+        AlertLogger.logInfo("🎯 THREE-PHASE MONITORING ACTIVE:");
+        AlertLogger.logInfo("   • Phase 1: Safe API proposal monitoring");
+        AlertLogger.logInfo("   • Phase 2: Confirmation tracking");
+        AlertLogger.logInfo("   • Phase 3: Aggressive mempool interception");
         AlertLogger.logInfo("   • Upgrade Detection: Ready for Bundle2 creation");
         AlertLogger.logInfo("   • Hacker Monitoring: Emergency response enabled");
-        AlertLogger.logInfo("   • Event-Driven: All handlers connected");
+        AlertLogger.logInfo("   • Alchemy SDK: Efficient address-filtered monitoring");
         AlertLogger.logInfo("");
         AlertLogger.logInfo("⚡ Waiting for events... Press Ctrl+C to stop");
         

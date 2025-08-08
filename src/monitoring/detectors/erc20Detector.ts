@@ -1,5 +1,5 @@
 import { Interface } from 'ethers';
-import { erc20Abi } from '../abi/erc20Abi';
+import { erc20Abi } from '../../abi/erc20Abi';
 
 export class ERC20Detector {
     private static interface = new Interface(erc20Abi);

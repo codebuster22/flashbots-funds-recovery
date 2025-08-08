@@ -1,7 +1,7 @@
 import { formatEther, formatUnits } from "ethers";
 import { flashbotsProvider } from "../config";
 
-export const simulateBundle = async (signedBundle: Array<string>, blockTag?: bigint | "latest") => {
+export const simulateBundle = async (signedBundle: Array<string>, blockTag?: bigint | "latest"): Promise<boolean> => {
     console.log("🧪 Starting bundle simulation...");
     console.log(`   📦 Bundle contains ${signedBundle.length} transactions`);
     
@@ -13,15 +13,21 @@ export const simulateBundle = async (signedBundle: Array<string>, blockTag?: big
     
     try {
         const simulation = await flashbotsProvider.simulate(signedBundle, blockTag);
-        console.log(simulation);
+        // console.log(simulation);
         
-        console.log("📊 Simulation Results:");
+        console.log(`📊 Simulation Results (${signedBundle.length} trx):`);
         console.log("=" .repeat(50));
-        
+
+        if (simulation.error) {
+            console.log("❌ SIMULATION FAILED!");
+            console.log(`   Error:`, simulation.error);
+            return false;
+        }
+
         if (simulation.firstRevert) {
             console.log("❌ SIMULATION FAILED!");
-            console.log(`   First Revert: ${simulation.firstRevert}`);
-            return;
+            console.log(`   First Revert:`, simulation.firstRevert);
+            return false;
         }
         
         console.log("✅ SIMULATION SUCCESSFUL!");
@@ -54,7 +60,8 @@ export const simulateBundle = async (signedBundle: Array<string>, blockTag?: big
         
         console.log("🎉 Bundle simulation completed successfully!");
         console.log("💡 The bundle is ready for production execution.");
-        
+
+        return true;
     } catch (error) {
         console.log("❌ SIMULATION FAILED!");
         console.log(`   Error: ${error.message}`);

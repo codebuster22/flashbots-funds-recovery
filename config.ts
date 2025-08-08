@@ -25,6 +25,7 @@ const envSchema = z.object({
     SIMULATE: z.string().optional().default("false"),
     USE_FLASHBOTS: z.string().optional().default("true"),
     BEAVER_RPC_URL: z.string().optional().default("https://rpc.beaverbuild.org/"),
+    ALCHEMY_API_KEY: z.string().optional(),
 });
 
 const env = envSchema.parse(process.env);
@@ -46,6 +47,7 @@ const safeApiBaseUrl = env.SAFE_API_BASE_URL;
 const simulate = env.SIMULATE === "true";
 const useFlashBots = env.USE_FLASHBOTS === "true";
 const beaverRpcUrl = env.BEAVER_RPC_URL;
+const alchemyApiKey = env.ALCHEMY_API_KEY;
 
 const normalProvider = new ethers.JsonRpcProvider(normalRpc);
 
@@ -77,6 +79,7 @@ export {
     maxPriorityFeePerGas,
     maxFeePerGas,
     beaverRpcUrl,
+    alchemyApiKey,
     useFlashBots,
     flashbotsProvider,
     erc20TokenAddress,

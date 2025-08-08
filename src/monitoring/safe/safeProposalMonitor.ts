@@ -30,8 +30,8 @@ export class SafeProposalMonitor extends EventEmitter {
         pollingInterval: number = 10000
     ) {
         super();
-        this.safeAddress = safeAddress.toLowerCase();
-        this.proxyAdminAddress = proxyAdminAddress.toLowerCase();
+        this.safeAddress = safeAddress; // Preserve checksum for Safe API calls
+        this.proxyAdminAddress = proxyAdminAddress.toLowerCase(); // ProxyAdmin can stay lowercase for now
         this.apiBaseUrl = apiBaseUrl;
         this.pollingInterval = pollingInterval;
     }

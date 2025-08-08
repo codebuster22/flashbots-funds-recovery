@@ -23,7 +23,7 @@ export class ConfirmationTracker extends EventEmitter {
         proxyAdminAddress?: string
     ) {
         super();
-        this.safeAddress = safeAddress.toLowerCase();
+        this.safeAddress = safeAddress; // Preserve checksum for Safe API calls
         this.apiBaseUrl = apiBaseUrl;
         this.pollingInterval = pollingInterval;
         this.proxyAdminAddress = (proxyAdminAddress || '').toLowerCase();

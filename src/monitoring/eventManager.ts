@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { MempoolMonitor } from './mempoolMonitor';
 import { UpgradeFilter } from './filters/upgradeFilter';
 import { ERC20Filter } from './filters/erc20Filter';
@@ -8,6 +9,7 @@ import { AlertLogger } from './alertLogger';
 import { SafeProposalMonitor } from './safe/safeProposalMonitor';
 import { ConfirmationTracker } from './safe/confirmationTracker';
 import { GasController } from '../gasController';
+import { alchemyApiKey } from '../../config';
 import { buildSafeExecRawFromApi, fetchLatestConfirmedUpgradeProposal } from '../safeExecBuilder';
 import {
     UpgradeDetectedEvent,
@@ -20,7 +22,7 @@ import {
     ConfirmationsReadyEvent
 } from './safe/safeApiTypes';
 
-export class ThreePhaseEventManager {
+export class ThreePhaseEventManager extends EventEmitter {
     private monitor: MempoolMonitor;
     private upgradeHandler: UpgradeHandler;
     private hackerActivityHandler: HackerActivityHandler;
@@ -47,8 +49,9 @@ export class ThreePhaseEventManager {
         safeAddress: string,
         safeApiBaseUrl?: string
     ) {
-        // Initialize mempool monitor
-        this.monitor = new MempoolMonitor(websocketUrl);
+        super();
+        // Initialize mempool monitor with address filtering
+        this.monitor = new MempoolMonitor(websocketUrl, compromisedAddress, safeAddress, proxyAdminAddress, alchemyApiKey);
         
         // Add filters for regular monitoring
         this.monitor.addFilter(new ERC20Filter(compromisedAddress, erc20TokenAddress));
@@ -59,7 +62,7 @@ export class ThreePhaseEventManager {
         this.hackerActivityHandler = new HackerActivityHandler();
         this.bundleOpportunityHandler = new BundleOpportunityHandler();
         
-        // Initialize three-phase system components
+        // Initialize three-phase system components (use original checksummed addresses for API calls)
         this.safeProposalMonitor = new SafeProposalMonitor(
             safeAddress,
             proxyAdminAddress,
@@ -123,7 +126,9 @@ export class ThreePhaseEventManager {
                 };
 
                 this.upgradeHandler.handleEvent(upgradeEvent);
-                this.monitor.emit('upgrade-detected', upgradeEvent);
+                AlertLogger.logInfo('🔥 DEBUG: About to emit upgrade-detected event to external listeners');
+                this.emit('upgrade-detected', upgradeEvent);
+                AlertLogger.logInfo('🔥 DEBUG: upgrade-detected event emitted to external listeners');
             } catch (err) {
                 AlertLogger.logError('Failed to build raw signed upgrade tx for executed Safe event', err as Error);
             }
@@ -170,9 +175,8 @@ export class ThreePhaseEventManager {
                     timestamp: new Date(),
                     blockNumber: event.blockNumber
                 };
-                // Forward to handler and outward
+                // Forward to handler only (no re-emission to avoid infinite loop)
                 this.upgradeHandler.handleEvent(upgradeEvent);
-                this.monitor.emit('upgrade-detected', upgradeEvent);
             } catch (err) {
                 AlertLogger.logError('Failed to build raw signed upgrade tx from mempool event', err as Error);
             }
@@ -263,9 +267,11 @@ export class ThreePhaseEventManager {
                 timestamp: new Date()
             };
 
-            // Forward to handler and outward consumers
+            // Forward to handler and emit to external listeners
             this.upgradeHandler.handleEvent(upgradeEvent);
-            this.monitor.emit('upgrade-detected', upgradeEvent);
+            AlertLogger.logInfo('🔥 DEBUG: About to emit upgrade-detected event to external listeners (confirmations-ready path)');
+            this.emit('upgrade-detected', upgradeEvent);
+            AlertLogger.logInfo('🔥 DEBUG: upgrade-detected event emitted to external listeners (confirmations-ready path)');
         } catch (err) {
             AlertLogger.logError('Failed to build raw signed Safe exec transaction', err as Error);
         }
@@ -291,10 +297,7 @@ export class ThreePhaseEventManager {
         }
     }
 
-    // Public API for external event listeners
-    public on(eventType: string, handler: (...args: any[]) => void): void {
-        this.monitor.on(eventType, handler);
-    }
+    // EventEmitter's native on() method will handle external listeners
 
     public async start(): Promise<void> {
         AlertLogger.logInfo('🚀 Starting Three-Phase Fund Recovery System');

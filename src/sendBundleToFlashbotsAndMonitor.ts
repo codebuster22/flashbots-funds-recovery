@@ -9,7 +9,7 @@ interface BundleSubmissionResult {
 }
 
 export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string>, targetBlockNumber: number): Promise<BundleSubmissionResult> => {
-    console.log("📡 Submitting bundle to Flashbots...");
+    console.log(`📡 Submitting bundle to Flashbots...`);
     console.log(`   📦 Bundle size: ${signedBundle.length} transactions`);
     console.log(`   🎯 Target block: ${targetBlockNumber}`);
     
@@ -26,16 +26,16 @@ export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string
             throw new Error(`Bundle submission failed: ${JSON.stringify(bundleReceipt.error)}`);
         }
         
-        console.log("✅ Bundle submitted successfully!");
+        console.log(`✅ Bundle submitted successfully! (${signedBundle.length} trx)`);
         console.log(`   🔗 Bundle Hash: ${bundleReceipt.bundleHash}`);
         console.log(`   ⏱️  Valid until block: ${targetBlockNumber}`);
         console.log("");
 
-        console.log(`⏳ Waiting for bundle inclusion in block ${targetBlockNumber}...`);
+        console.log(`⏳ Waiting for bundle inclusion (${signedBundle.length} trx) in block ${targetBlockNumber}...`);
         
         // Wait for response
         const waitResponse = await bundleReceipt.wait();
-        console.log(`📊 Bundle Resolution: ${waitResponse}`);
+        console.log(`📊 Bundle Resolution (${signedBundle.length} trx): ${waitResponse}`);
         
         const result: BundleSubmissionResult = {
             bundleHash: bundleReceipt.bundleHash,
@@ -45,13 +45,13 @@ export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string
         };
         
         if (waitResponse === FlashbotsBundleResolution.BundleIncluded) {
-            console.log(`🎉 SUCCESS: Bundle included in block ${targetBlockNumber}!`);
+            console.log(`🎉 SUCCESS: Bundle (${signedBundle.length} trx) included in block ${targetBlockNumber}!`);
         } else if (waitResponse === FlashbotsBundleResolution.BlockPassedWithoutInclusion) {
-            console.log(`⚠️  Bundle not included in block ${targetBlockNumber} - block passed`);
+            console.log(`⚠️  Bundle (${signedBundle.length} trx) not included in block ${targetBlockNumber} - block passed`);
         } else if (waitResponse === FlashbotsBundleResolution.AccountNonceTooHigh) {
-            console.log(`❌ Bundle failed: Account nonce too high`);
+            console.log(`❌ Bundle (${signedBundle.length} trx) failed: Account nonce too high`);
         } else {
-            console.log(`❓ Unexpected bundle resolution: ${waitResponse}`);
+            console.log(`❓ Unexpected bundle resolution (${signedBundle.length} trx): ${waitResponse}`);
         }
         
         return result;

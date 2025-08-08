@@ -8,10 +8,8 @@
     "dev": "tsx watch index.ts",
     "bundle1": "tsx bundle1Submission.ts",
     "bundle1:dev": "tsx watch bundle1Submission.ts",
-    "monitor": "tsx monitorMempool.ts",
-    "monitor:dev": "tsx watch monitorMempool.ts",
-    "monitor:advanced": "tsx monitorMempoolAdvanced.ts",
-    "monitor:advanced:dev": "tsx watch monitorMempoolAdvanced.ts"
+    "monitor": "tsx monitorMempoolAdvanced.ts",
+    "monitor:dev": "tsx watch monitorMempoolAdvanced.ts"
   },
   "ts-node": {
     "esm": true
@@ -25,6 +23,7 @@
   },
   "dependencies": {
     "@flashbots/ethers-provider-bundle": "^1.0.0",
+    "alchemy-sdk": "^3.6.2",
     "axios": "^1.11.0",
     "dotenv": "^17.2.1",
     "ethers": "6.7.1",

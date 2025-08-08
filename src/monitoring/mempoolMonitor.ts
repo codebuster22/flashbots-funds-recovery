@@ -1,25 +1,57 @@
 import { EventEmitter } from 'events';
-import { WebSocketProvider } from 'ethers';
+import { Alchemy, Network, AlchemySubscription } from 'alchemy-sdk';
+import { chainId } from '../../config';
 import { BaseTransactionFilter } from './filters/baseFilter';
 import { AlertLogger } from './alertLogger';
 import { FilterResult, UpgradeDetectedEvent, HackerActivityEvent, UpgradeFilterResult, ERC20FilterResult } from './types';
 import { ExpectedTransaction } from './safe/safeApiTypes';
 
 export class MempoolMonitor extends EventEmitter {
-    private provider: WebSocketProvider;
+    private alchemy: Alchemy;
+    private subscriptionId: any = null;
     private filters: BaseTransactionFilter[] = [];
     private isRunning: boolean = false;
-    private reconnectAttempts: number = 0;
-    private maxReconnectAttempts: number = 5;
-    private reconnectDelay: number = 5000;
     
     // Enhanced for targeted monitoring
     private targetTransaction: ExpectedTransaction | null = null;
     private aggressiveMode: boolean = false;
+    
+    // Address filters for Alchemy (need lowercase for filtering)
+    private compromisedAddressLower: string;
+    private safeAddressLower: string;
+    private proxyAdminAddressLower: string;
+    
+    // Original addresses (preserve checksum for API calls)
+    private compromisedAddress: string;
+    private safeAddress: string;
+    private proxyAdminAddress: string;
 
-    constructor(websocketUrl: string) {
+    constructor(
+        websocketUrl: string, 
+        compromisedAddress: string, 
+        safeAddress: string, 
+        proxyAdminAddress: string, 
+        alchemyApiKey?: string
+    ) {
         super();
-        this.provider = new WebSocketProvider(websocketUrl);
+        // Store original checksummed addresses
+        this.compromisedAddress = compromisedAddress;
+        this.safeAddress = safeAddress;
+        this.proxyAdminAddress = proxyAdminAddress;
+        
+        // Store lowercase versions for Alchemy filtering
+        this.compromisedAddressLower = compromisedAddress.toLowerCase();
+        this.safeAddressLower = safeAddress.toLowerCase();
+        this.proxyAdminAddressLower = proxyAdminAddress.toLowerCase();
+        
+        // Initialize Alchemy with dynamic network
+        const network = chainId === 11155111 ? Network.ETH_SEPOLIA : Network.ETH_MAINNET;
+        const settings = {
+            apiKey: alchemyApiKey || '',
+            network: network,
+            url: websocketUrl
+        };
+        this.alchemy = new Alchemy(settings);
         this.setupEventHandlers();
     }
 
@@ -34,75 +66,18 @@ export class MempoolMonitor extends EventEmitter {
     }
 
     private setupEventHandlers(): void {
-        // Avoid relying on internal websocket implementation; feature-detect if present
-        const ws: any = (this.provider as any).websocket || (this.provider as any)._websocket;
-        if (ws) {
-            ws.on('open', () => {
-                AlertLogger.logInfo('WebSocket connection established');
-                this.reconnectAttempts = 0;
-            });
-            ws.on('close', () => {
-                AlertLogger.logError('WebSocket connection closed');
-                if (this.isRunning) {
-                    this.handleReconnect();
-                }
-            });
-            ws.on('error', (error: Error) => {
-                AlertLogger.logError('WebSocket error', error);
-            });
-        }
-    }
-
-    private async handleReconnect(): Promise<void> {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            AlertLogger.logError('Max reconnection attempts reached. Stopping monitor.');
-            this.stop();
-            return;
-        }
-
-        this.reconnectAttempts++;
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+        this.alchemy.ws.on('open', () => {
+            AlertLogger.logInfo('Alchemy WebSocket connection established');
+        });
         
-        AlertLogger.logInfo(`Attempting reconnect ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+        this.alchemy.ws.on('close', () => {
+            AlertLogger.logError('Alchemy WebSocket connection closed');
+        });
         
-        setTimeout(() => {
-            if (this.isRunning) {
-                this.start().catch(error => {
-                    AlertLogger.logError('Reconnection failed', error);
-                });
-            }
-        }, delay);
+        this.alchemy.ws.on('error', (error: Error) => {
+            AlertLogger.logError('Alchemy WebSocket error', error);
+        });
     }
-
-    private onPendingTransaction = async (txHash: string): Promise<void> => {
-        try {
-            const tx = await this.provider.getTransaction(txHash);
-            
-            if (!tx) {
-                return;
-            }
-
-            // Phase 3: Check for targeted upgrade transaction first (highest priority)
-            if (this.targetTransaction && this.aggressiveMode) {
-                if (this.isTargetUpgradeTransaction(tx)) {
-                    AlertLogger.logInfo('🎯 TARGET UPGRADE TRANSACTION DETECTED IN MEMPOOL!');
-                    await this.handleTargetTransactionDetected(tx);
-                    return; // Priority handling, skip other filters
-                }
-            }
-
-            // Regular filter processing (hacker activity, etc.)
-            for (const filter of this.filters) {
-                const result = filter.filterTransaction(tx);
-                
-                if (result) {
-                    await this.emitFilterEvent(result, tx);
-                }
-            }
-        } catch (error) {
-            AlertLogger.logError(`Error processing transaction ${txHash}`, error as Error);
-        }
-    };
 
     private async emitFilterEvent(result: FilterResult, tx: any): Promise<void> {
         const blockNumber = await this.getCurrentBlockNumber();
@@ -145,7 +120,7 @@ export class MempoolMonitor extends EventEmitter {
 
     private async getCurrentBlockNumber(): Promise<number | undefined> {
         try {
-            return await this.provider.getBlockNumber();
+            return await this.alchemy.core.getBlockNumber();
         } catch (error) {
             return undefined;
         }
@@ -160,12 +135,23 @@ export class MempoolMonitor extends EventEmitter {
         try {
             this.isRunning = true;
             
-            AlertLogger.logInfo('Starting mempool monitor...');
+            AlertLogger.logInfo('Starting mempool monitor (Alchemy pendingTransactions with address filters)...');
             AlertLogger.logInfo(`Active filters: ${this.filters.map(f => f.getFilterName()).join(', ')}`);
-            
-            await this.provider.on('pending', this.onPendingTransaction);
-            
-            AlertLogger.logInfo('✅ Mempool monitor started successfully');
+            AlertLogger.logInfo(`Filtering fromAddress: ${this.compromisedAddressLower}`);
+            AlertLogger.logInfo(`Filtering toAddress: [${this.safeAddressLower}, ${this.proxyAdminAddressLower}]`);
+
+            // Subscribe to filtered pending transactions (use lowercase for Alchemy)
+            this.subscriptionId = this.alchemy.ws.on(
+                {
+                    method: AlchemySubscription.PENDING_TRANSACTIONS,
+                    fromAddress: this.compromisedAddressLower,
+                    toAddress: [this.safeAddressLower, this.proxyAdminAddressLower],
+                    hashesOnly: false
+                },
+                this.onAlchemyPendingTransaction
+            );
+
+            AlertLogger.logInfo('✅ Mempool monitor started via Alchemy with address filtering');
             
         } catch (error) {
             this.isRunning = false;
@@ -181,10 +167,13 @@ export class MempoolMonitor extends EventEmitter {
         AlertLogger.logInfo('Stopping mempool monitor...');
         
         this.isRunning = false;
-        this.provider.off('pending', this.onPendingTransaction);
-        const ws: any = (this.provider as any).websocket || (this.provider as any)._websocket;
-        if (ws && typeof ws.close === 'function') {
-            ws.close();
+        if (this.subscriptionId) {
+            try { 
+                this.alchemy.ws.off(this.subscriptionId);
+                this.subscriptionId = null;
+            } catch (e) {
+                AlertLogger.logError('Error unsubscribing from Alchemy', e as Error);
+            }
         }
         
         AlertLogger.logInfo('✅ Mempool monitor stopped');
@@ -272,6 +261,35 @@ export class MempoolMonitor extends EventEmitter {
         this.clearTargetTransaction();
     }
 
+    // Alchemy event handler (receives full tx objects)
+    private onAlchemyPendingTransaction = async (tx: any): Promise<void> => {
+        try {
+            if (!tx) return;
+            
+            // Normalize Alchemy's tx.input to tx.data for ethers compatibility
+            if (tx.input && !tx.data) {
+                tx.data = tx.input;
+            }
+            
+            // Phase 3 targeted first (highest priority)
+            if (this.targetTransaction && this.aggressiveMode && this.isTargetUpgradeTransaction(tx)) {
+                AlertLogger.logInfo('🎯 TARGET UPGRADE TRANSACTION DETECTED IN MEMPOOL (Alchemy)!');
+                await this.handleTargetTransactionDetected(tx);
+                return; // Priority handling, skip other filters
+            }
+            
+            // Regular filter processing (hacker activity, etc.)
+            for (const filter of this.filters) {
+                const result = filter.filterTransaction(tx);
+                if (result) {
+                    await this.emitFilterEvent(result, tx);
+                }
+            }
+        } catch (error) {
+            AlertLogger.logError('Error processing Alchemy pending tx', error as Error);
+        }
+    };
+
     private serializeTransaction(tx: any): string {
         try {
             return JSON.stringify({
@@ -301,13 +319,33 @@ export class MempoolMonitor extends EventEmitter {
         aggressiveMode: boolean;
         hasTargetTransaction: boolean;
         targetTransactionTo?: string;
+        filterAddresses: {
+            compromisedAddress: string;
+            safeAddress: string;
+            proxyAdminAddress: string;
+            alchemyFilters: {
+                compromisedAddressLower: string;
+                safeAddressLower: string;
+                proxyAdminAddressLower: string;
+            };
+        };
     } {
         return {
             isRunning: this.isRunning,
             filtersCount: this.filters.length,
             aggressiveMode: this.aggressiveMode,
             hasTargetTransaction: this.targetTransaction !== null,
-            targetTransactionTo: this.targetTransaction?.to
+            targetTransactionTo: this.targetTransaction?.to,
+            filterAddresses: {
+                compromisedAddress: this.compromisedAddress,
+                safeAddress: this.safeAddress,
+                proxyAdminAddress: this.proxyAdminAddress,
+                alchemyFilters: {
+                    compromisedAddressLower: this.compromisedAddressLower,
+                    safeAddressLower: this.safeAddressLower,
+                    proxyAdminAddressLower: this.proxyAdminAddressLower
+                }
+            }
         };
     }
 }

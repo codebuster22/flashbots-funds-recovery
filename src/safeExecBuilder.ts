@@ -60,6 +60,9 @@ export async function buildSafeExecRawFromApi(
     signatures
   ]);
 
+  // Fetch current nonce for funder wallet (required for pre-signed transactions)
+  const nonce = await funderAuthSigner.provider!.getTransactionCount(funderAuthSigner.address, 'pending');
+  
   const tx = {
     chainId: chainId,
     type: 2,
@@ -68,7 +71,8 @@ export async function buildSafeExecRawFromApi(
     data: execData,
     maxFeePerGas: gas.maxFeePerGas,
     maxPriorityFeePerGas: gas.maxPriorityFeePerGas,
-    gasLimit: gas.gasLimit ?? BigInt(300000)
+    gasLimit: gas.gasLimit ?? BigInt(300000),
+    nonce: nonce
   } as const;
 
   const signed = await funderAuthSigner.signTransaction(tx);
@@ -81,7 +85,7 @@ export async function fetchLatestConfirmedUpgradeProposal(
   safeApiBaseUrl?: string
 ): Promise<SafeTransaction | null> {
   const baseUrl = safeApiBaseUrl || 'https://safe-transaction-mainnet.safe.global';
-  const apiUrl = `${baseUrl}/api/v2/safes/${safeAddress.toLowerCase()}/multisig-transactions/`;
+  const apiUrl = `${baseUrl}/api/v2/safes/${safeAddress}/multisig-transactions/`; // Preserve checksum for Safe API
   const params = { limit: 50, ordering: '-nonce' } as any;
 
   const resp = await axios.get(apiUrl, { params });

@@ -70,7 +70,7 @@ if (simulate) {
         const signedBundle = await signBundle([trx1, trx2, trx3]);
         
         console.log("🧪 Running bundle simulation...");
-        await simulateBundle(signedBundle);
+        const simulationResult = await simulateBundle(signedBundle);
 
         console.log("🔥 Sending bundle to Flashbots...");
         await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);

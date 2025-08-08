@@ -89,7 +89,11 @@ export class Bundle2Controller extends EventEmitter {
             
             // Simulate first
             AlertLogger.logInfo('🧪 Simulating Bundle2...');
-            await simulateBundle(signedBundle);
+            const simulationResult = await simulateBundle(signedBundle);
+            if (!simulationResult) {
+                AlertLogger.logInfo('❌ Simulation failed, skipping bundle2 submission...');
+                return;
+            }
             
             // Submit to Flashbots only
             AlertLogger.logInfo(`🔥 Submitting Bundle2 to Flashbots for block ${targetBlockNumber}`);

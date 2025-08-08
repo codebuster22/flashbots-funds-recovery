@@ -71,6 +71,7 @@ class MasterOrchestrator {
     private setupEventHandlers(): void {
         // Upgrade detection → Bundle2 activation
         this.eventManager.on('upgrade-detected', (event) => {
+            AlertLogger.logInfo('🔥 DEBUG: MasterOrchestrator received upgrade-detected event');
             if (this.recoverySucceeded) return;
             
             AlertLogger.logInfo('🚀 UPGRADE DETECTED - Activating Bundle2 strategy');
