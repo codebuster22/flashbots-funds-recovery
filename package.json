@@ -5,7 +5,13 @@
   "private": true,
   "scripts": {
     "start": "tsx index.ts",
-    "dev": "tsx watch index.ts"
+    "dev": "tsx watch index.ts",
+    "bundle1": "tsx bundle1Submission.ts",
+    "bundle1:dev": "tsx watch bundle1Submission.ts",
+    "monitor": "tsx monitorMempool.ts",
+    "monitor:dev": "tsx watch monitorMempool.ts",
+    "monitor:advanced": "tsx monitorMempoolAdvanced.ts",
+    "monitor:advanced:dev": "tsx watch monitorMempoolAdvanced.ts"
   },
   "ts-node": {
     "esm": true
