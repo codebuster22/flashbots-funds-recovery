@@ -108,7 +108,7 @@ export class SuccessMonitor extends EventEmitter {
 
         // Determine transaction type and success status
         const { type, tokensRecovered } = knownType ? 
-            { type: knownType, tokensRecovered: await this.checkTokensRecovered(knownType) } :
+            { type: knownType, tokensRecovered: await this.checkTokensRecovered(knownType, txHash) } :
             await this.analyzeTransaction(txHash, receipt);
 
         const successEvent: SuccessEvent = {
@@ -151,12 +151,13 @@ export class SuccessMonitor extends EventEmitter {
                 
                 // ERC20 transfer signature
                 if (methodSignature === '0xa9059cbb') {
-                    return { type: 'hijacked-transfer', tokensRecovered: true };
+                    const recovered = await this.verifyFunderReceivedFromTransaction(transaction);
+                    return { type: 'hijacked-transfer', tokensRecovered: recovered };
                 }
             }
 
             // Default to bundle transaction if we can't determine specifically
-            return { type: 'bundle1', tokensRecovered: true };
+            return { type: 'bundle1', tokensRecovered: await this.verifyFunderBalanceIncrease() };
 
         } catch (error) {
             AlertLogger.logError('Failed to analyze transaction', error as Error);
@@ -164,16 +165,22 @@ export class SuccessMonitor extends EventEmitter {
         }
     }
 
-    private async checkTokensRecovered(type: SuccessEvent['type']): Promise<boolean> {
-        // Only transfer/transferFrom hijacking and bundles recover tokens
-        return ['bundle1', 'bundle2', 'hijacked-transfer'].includes(type);
+    private async checkTokensRecovered(type: SuccessEvent['type'], txHash: string): Promise<boolean> {
+        if (type === 'hijacked-transfer') {
+            const tx = await normalProvider.getTransaction(txHash);
+            return await this.verifyFunderReceivedFromTransaction(tx);
+        }
+        if (type === 'bundle1' || type === 'bundle2') {
+            return await this.verifyFunderBalanceIncrease();
+        }
+        return false;
     }
 
     private async verifyTokenRecovery(): Promise<void> {
         try {
             AlertLogger.logInfo('🔍 Verifying token recovery...');
             
-            const funderBalance = await erc20Contract.balanceOf(funderAddress);
+            const funderBalance = await (erc20Contract as any).balanceOf(funderAddress);
             AlertLogger.logInfo(`💰 Funder wallet balance: ${funderBalance.toString()} tokens`);
             
             if (funderBalance > 0n) {
@@ -183,6 +190,28 @@ export class SuccessMonitor extends EventEmitter {
             }
         } catch (error) {
             AlertLogger.logError('Failed to verify token recovery', error as Error);
+        }
+    }
+
+    private async verifyFunderBalanceIncrease(): Promise<boolean> {
+        try {
+            const bal = await (erc20Contract as any).balanceOf(funderAddress);
+            return bal > 0n;
+        } catch {
+            return false;
+        }
+    }
+
+    private async verifyFunderReceivedFromTransaction(tx: any): Promise<boolean> {
+        try {
+            // Decode transfer(to, amount) and verify recipient == funder
+            if (!tx || !tx.data) return false;
+            const sig = tx.data.slice(0, 10);
+            if (sig !== '0xa9059cbb') return false;
+            const to = '0x' + tx.data.slice(34, 74);
+            return to.toLowerCase() === funderAddress.toLowerCase();
+        } catch {
+            return false;
         }
     }
 

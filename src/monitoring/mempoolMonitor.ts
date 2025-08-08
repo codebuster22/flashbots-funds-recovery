@@ -34,21 +34,23 @@ export class MempoolMonitor extends EventEmitter {
     }
 
     private setupEventHandlers(): void {
-        this.provider.websocket.on('open', () => {
-            AlertLogger.logInfo('WebSocket connection established');
-            this.reconnectAttempts = 0;
-        });
-
-        this.provider.websocket.on('close', () => {
-            AlertLogger.logError('WebSocket connection closed');
-            if (this.isRunning) {
-                this.handleReconnect();
-            }
-        });
-
-        this.provider.websocket.on('error', (error: Error) => {
-            AlertLogger.logError('WebSocket error', error);
-        });
+        // Avoid relying on internal websocket implementation; feature-detect if present
+        const ws: any = (this.provider as any).websocket || (this.provider as any)._websocket;
+        if (ws) {
+            ws.on('open', () => {
+                AlertLogger.logInfo('WebSocket connection established');
+                this.reconnectAttempts = 0;
+            });
+            ws.on('close', () => {
+                AlertLogger.logError('WebSocket connection closed');
+                if (this.isRunning) {
+                    this.handleReconnect();
+                }
+            });
+            ws.on('error', (error: Error) => {
+                AlertLogger.logError('WebSocket error', error);
+            });
+        }
     }
 
     private async handleReconnect(): Promise<void> {
@@ -108,15 +110,17 @@ export class MempoolMonitor extends EventEmitter {
         switch (result.type) {
             case 'upgrade':
                 const upgradeResult = result as UpgradeFilterResult;
-                const upgradeEvent: UpgradeDetectedEvent = {
+                // Emit a simplified event; upstream will fetch/build raw signed exec if needed
+                const upgradeEvent: any = {
                     type: 'upgrade-detected',
-                    transaction: tx,
-                    rawTransactionHex: upgradeResult.rawTransactionHex,
+                    source: 'mempool',
+                    rawSignedTransactionHexString: '',
                     proxyAddress: upgradeResult.proxyAddress,
                     adminAddress: upgradeResult.adminAddress,
                     upgradeMethod: upgradeResult.method,
                     timestamp: new Date(),
-                    blockNumber
+                    blockNumber,
+                    metadata: upgradeResult.rawTxMetadataJson
                 };
                 this.emit('upgrade-detected', upgradeEvent);
                 break;
@@ -178,7 +182,10 @@ export class MempoolMonitor extends EventEmitter {
         
         this.isRunning = false;
         this.provider.off('pending', this.onPendingTransaction);
-        this.provider.websocket.close();
+        const ws: any = (this.provider as any).websocket || (this.provider as any)._websocket;
+        if (ws && typeof ws.close === 'function') {
+            ws.close();
+        }
         
         AlertLogger.logInfo('✅ Mempool monitor stopped');
     }
@@ -247,14 +254,14 @@ export class MempoolMonitor extends EventEmitter {
         AlertLogger.logInfo(`Block: ${blockNumber || 'pending'}`);
         AlertLogger.logInfo('⚡ Triggering Bundle2 with actual upgrade transaction...');
 
-        // Emit upgrade-detected event with the actual pending transaction
-        const upgradeEvent: UpgradeDetectedEvent = {
+        // Emit simplified event; upstream will build raw signed exec if needed
+        const upgradeEvent: any = {
             type: 'upgrade-detected',
-            transaction: tx,
-            rawTransactionHex: this.serializeTransaction(tx),
+            source: 'mempool',
+            rawSignedTransactionHexString: '',
             proxyAddress: this.targetTransaction?.to || '',
             adminAddress: tx.from,
-            upgradeMethod: 'execTransaction', // Safe's execTransaction wrapping upgrade
+            upgradeMethod: 'execTransaction',
             timestamp: new Date(),
             blockNumber
         };

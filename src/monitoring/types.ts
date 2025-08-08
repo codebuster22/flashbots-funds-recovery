@@ -5,8 +5,15 @@ export interface SuspiciousTransaction {
     methodName: string;
     methodSignature: string;
     timestamp: Date;
-    gasPrice?: bigint;
+    // EIP-1559 fields (preferred)
     maxFeePerGas?: bigint;
+    maxPriorityFeePerGas?: bigint;
+    // Additional context for reliable replacement
+    type?: number; // should be 2 for EIP-1559
+    nonce?: number;
+    gasLimit?: bigint;
+    // Legacy field retained as optional for logging only (not used in logic)
+    gasPrice?: bigint;
     value: bigint;
 }
 
@@ -24,8 +31,8 @@ export interface BaseMonitoringEvent {
 
 export interface UpgradeDetectedEvent extends BaseMonitoringEvent {
     type: 'upgrade-detected';
-    transaction: any;
-    rawTransactionHex: string;
+    source: 'safe-api' | 'mempool';
+    rawSignedTransactionHexString: string;
     proxyAddress: string;
     adminAddress: string;
     upgradeMethod: string;
@@ -63,7 +70,8 @@ export interface UpgradeFilterResult extends FilterResult {
     proxyAddress: string;
     adminAddress: string;
     method: string;
-    rawTransactionHex: string;
+    // JSON metadata for logging only; not a raw signed tx
+    rawTxMetadataJson?: string;
 }
 
 export interface ERC20FilterResult extends FilterResult {

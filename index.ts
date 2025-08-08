@@ -77,7 +77,7 @@ class MasterOrchestrator {
             AlertLogger.logInfo(`Upgrade method: ${event.upgradeMethod}`);
             AlertLogger.logInfo(`Proxy: ${event.proxyAddress}`);
             
-            this.startBundle2Strategy(event.rawTransactionHex);
+            this.startBundle2Strategy(event.rawSignedTransactionHexString);
         });
 
         // Hacker activity → Emergency replacement
@@ -155,7 +155,7 @@ class MasterOrchestrator {
     private logConfiguration(): void {
         console.log("📋 Three-Phase System Configuration:");
         console.log(`   Mode: ${simulate ? "🧪 SIMULATION" : "⚡ PRODUCTION"}`);
-        console.log(`   Builder: ${useFlashBots ? "🔥 Flashbots" : "🦫 Beaver Build"}`);
+        console.log(`   Builder: 🔥 Flashbots`);
         console.log(`   Funder Address: ${funderAddress}`);
         console.log(`   Compromised Address: ${compromisedAddress}`);
         console.log(`   ERC20 Token: ${erc20TokenAddress}`);
@@ -240,18 +240,13 @@ class MasterOrchestrator {
             // Simulate bundle first
             await simulateBundle(signedBundle);
             
-            // Submit to builder
-            if (useFlashBots) {
-                const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
-                if (result.success) {
-                    AlertLogger.logInfo(`🎉 Bundle1 included in block ${result.targetBlock}!`);
-                    // Bundle1 success means tokens were recovered - trigger success handling
-                    this.handleRecoverySuccess();
-                    return; // Exit early on success
-                }
-                // If bundle1 failed, continue silently (expected until tokens unlock)
-            } else {
-                await sendBundleToBeaver(signedBundle, BigInt(targetBlockNumber));
+            // Submit to Flashbots
+            const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
+            if (result.success) {
+                AlertLogger.logInfo(`🎉 Bundle1 included in block ${result.targetBlock}!`);
+                // Bundle1 success means tokens were recovered - trigger success handling
+                this.handleRecoverySuccess();
+                return; // Exit early on success
             }
 
         } catch (error) {
@@ -270,13 +265,13 @@ class MasterOrchestrator {
         return [fundingTx, recoveryTx, withdrawTx];
     }
 
-    private async startBundle2Strategy(upgradeTransactionHex: string): Promise<void> {
+    private async startBundle2Strategy(upgradeRawSignedHex: string): Promise<void> {
         if (this.recoverySucceeded) return;
         
         AlertLogger.logInfo('🚀 Activating Bundle2 strategy with upgrade transaction...');
         
         try {
-            await this.bundle2Controller.startBundle2Submission(upgradeTransactionHex);
+            await this.bundle2Controller.startBundle2Submission(upgradeRawSignedHex);
             AlertLogger.logInfo('✅ Bundle2 strategy activated');
         } catch (error) {
             AlertLogger.logError('Failed to start Bundle2 strategy', error as Error);

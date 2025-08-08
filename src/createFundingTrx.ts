@@ -1,6 +1,6 @@
 import { parseUnits, formatEther, formatUnits } from "ethers";
 import { TransactionEntry } from "./types";
-import { compromisedAddress, ETH_AMOUNT_TO_FUND, funderAuthSigner, maxFeePerGas, maxPriorityFeePerGas, funderAddress } from "../config";
+import { compromisedAddress, ETH_AMOUNT_TO_FUND, funderAuthSigner, maxFeePerGas, maxPriorityFeePerGas, funderAddress, chainId } from "../config";
 
 export const createFundingTrx = (): TransactionEntry => {
     console.log("   💰 Creating funding transaction...");
@@ -24,7 +24,7 @@ export const createFundingTrx = (): TransactionEntry => {
         value: ethAmountToSend,
         maxFeePerGas: maxFeePerGas,
         maxPriorityFeePerGas: maxPriorityFeePerGas,
-        chainId: 1,
+        chainId: chainId,
         type: 2,
         gasLimit: gasLimit
     };

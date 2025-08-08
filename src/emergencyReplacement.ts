@@ -7,7 +7,8 @@ import {
     balance,
     normalProvider,
     maxFeePerGas,
-    maxPriorityFeePerGas
+    maxPriorityFeePerGas,
+    chainId
 } from '../config';
 import { AlertLogger } from './monitoring/alertLogger';
 import { SuspiciousTransaction } from './monitoring/types';
@@ -40,8 +41,8 @@ export class EmergencyReplacement {
         AlertLogger.logInfo('🎯 Creating transfer hijacking transaction...');
         AlertLogger.logInfo(`Hijacking ${hackerTx.methodName} with full balance: ${balance.toString()}`);
 
-        const hackerNonce = await this.getHackerNonce();
-        const competitiveGas = this.calculateCompetitiveGas(hackerTx);
+        const hackerNonce = await this.getHackerNonce(hackerTx);
+        const competitiveGas = await this.calculateCompetitiveGas(hackerTx);
 
         // Create transfer to our funder wallet with full balance
         const transferData = this.erc20Interface.encodeFunctionData('transfer', [
@@ -49,10 +50,10 @@ export class EmergencyReplacement {
             balance
         ]);
 
-        return {
+            return {
             signer: compromisedAuthSigner,
             transaction: {
-                chainId: 1,
+                chainId: chainId,
                 type: 2,
                 value: 0,
                 to: hackerTx.to,
@@ -69,14 +70,14 @@ export class EmergencyReplacement {
         AlertLogger.logInfo('🛡️ Creating approval neutralization transaction...');
         AlertLogger.logInfo('Burning nonce with 0 ETH transfer to block approval');
 
-        const hackerNonce = await this.getHackerNonce();
-        const dominatingGas = this.calculateDominatingPriorityFee(hackerTx);
+        const hackerNonce = await this.getHackerNonce(hackerTx);
+        const dominatingGas = await this.calculateDominatingPriorityFee(hackerTx);
 
         // Create 0 ETH transfer to compromised wallet (nonce burn)
         return {
             signer: compromisedAuthSigner,
             transaction: {
-                chainId: 1,
+                chainId: chainId,
                 type: 2,
                 value: 0,
                 to: compromisedAuthSigner.address, // Send to self
@@ -89,8 +90,12 @@ export class EmergencyReplacement {
         };
     }
 
-    private static async getHackerNonce(): Promise<number> {
+    private static async getHackerNonce(hackerTx?: SuspiciousTransaction): Promise<number> {
         try {
+            if (hackerTx?.nonce !== undefined) {
+                AlertLogger.logInfo(`Using hacker tx nonce: ${hackerTx.nonce}`);
+                return hackerTx.nonce;
+            }
             const nonce = await normalProvider.getTransactionCount(compromisedAuthSigner.address, 'pending');
             AlertLogger.logInfo(`Using compromised wallet nonce: ${nonce}`);
             return nonce;
@@ -100,58 +105,69 @@ export class EmergencyReplacement {
         }
     }
 
-    private static calculateCompetitiveGas(hackerTx: SuspiciousTransaction): {
+    private static async calculateCompetitiveGas(hackerTx: SuspiciousTransaction): Promise<{
         maxFeePerGas: bigint;
         maxPriorityFeePerGas: bigint;
-    } {
-        // Use 25% higher gas prices than hacker
-        const gasMultiplier = 1.25;
-        
-        const hackerMaxFee = hackerTx.maxFeePerGas || hackerTx.gasPrice || maxFeePerGas;
-        const hackerPriorityFee = hackerTx.maxFeePerGas ? 
-            (hackerTx.maxPriorityFeePerGas || maxPriorityFeePerGas) : 
-            (hackerTx.gasPrice || maxPriorityFeePerGas);
+    }> {
+        // EIP-1559 only. Bump both tip and maxFee over hacker's by multiplier and ensure baseFee coverage.
+        const bump = 1.25;
+        const minTip = parseUnits('2', 'gwei');
+        const baseFee = (await normalProvider.getBlock('latest'))?.baseFeePerGas ?? 0n;
 
-        const competitiveMaxFee = BigInt(Math.ceil(Number(hackerMaxFee) * gasMultiplier));
-        const competitivePriorityFee = BigInt(Math.ceil(Number(hackerPriorityFee) * gasMultiplier));
+        // Support both legacy and 1559 hacker transactions
+        const inferredHackerTip = hackerTx.maxPriorityFeePerGas ?? (hackerTx.gasPrice ?? 0n);
+        const hackerTip = inferredHackerTip || maxPriorityFeePerGas;
+        const inferredHackerMaxFee = hackerTx.maxFeePerGas ?? (hackerTx.gasPrice ? baseFee + hackerTx.gasPrice : undefined);
+        const hackerMaxFee = inferredHackerMaxFee ?? (baseFee + hackerTip);
 
-        AlertLogger.logInfo(`Gas Competition:
-   Hacker Max Fee: ${formatUnits(hackerMaxFee, 'gwei')} gwei
-   Our Max Fee: ${formatUnits(competitiveMaxFee, 'gwei')} gwei (+25%)
-   Hacker Priority: ${formatUnits(hackerPriorityFee, 'gwei')} gwei  
-   Our Priority: ${formatUnits(competitivePriorityFee, 'gwei')} gwei (+25%)`);
+        const ourTip = BigInt(Math.ceil(Number(hackerTip) * bump));
+        const finalTip = ourTip > minTip ? ourTip : minTip;
+
+        const feeByBump = BigInt(Math.ceil(Number(hackerMaxFee) * bump));
+        const feeByBase = baseFee + finalTip + parseUnits('5', 'gwei');
+        const finalMaxFee = feeByBump > feeByBase ? feeByBump : feeByBase;
+
+        AlertLogger.logInfo(`Gas Competition (1559):
+   Base Fee: ${formatUnits(baseFee, 'gwei')} gwei
+   Hacker MaxFee: ${formatUnits(hackerMaxFee, 'gwei')} gwei | Tip: ${formatUnits(hackerTip, 'gwei')} gwei
+   Our MaxFee: ${formatUnits(finalMaxFee, 'gwei')} gwei | Tip: ${formatUnits(finalTip, 'gwei')} gwei`);
 
         return {
-            maxFeePerGas: competitiveMaxFee,
-            maxPriorityFeePerGas: competitivePriorityFee
+            maxFeePerGas: finalMaxFee,
+            maxPriorityFeePerGas: finalTip
         };
     }
 
-    private static calculateDominatingPriorityFee(hackerTx: SuspiciousTransaction): {
+    private static async calculateDominatingPriorityFee(hackerTx: SuspiciousTransaction): Promise<{
         maxFeePerGas: bigint;
         maxPriorityFeePerGas: bigint;
-    } {
-        // Calculate priority fee dominance: our_priority × our_gas > hacker_priority × hacker_gas
-        const hackerGasLimit = BigInt('50000'); // Typical approve gas
-        const ourGasLimit = BigInt('21000'); // Simple transfer gas
-        
-        const hackerPriorityFee = hackerTx.maxPriorityFeePerGas || 
-            hackerTx.gasPrice || 
-            maxPriorityFeePerGas;
+    }> {
+        // Ensure our (tip * ourGas) > (hackerTip * hackerGas) by a margin and cover base fee.
+        const baseFee = (await normalProvider.getBlock('latest'))?.baseFeePerGas ?? 0n;
+        const minTip = parseUnits('2', 'gwei');
+        const buffer = parseUnits('5', 'gwei');
 
-        const hackerPriorityTotal = hackerPriorityFee * hackerGasLimit;
-        const requiredPriorityFee = hackerPriorityTotal / ourGasLimit + parseUnits('1', 'gwei'); // +1 gwei buffer
-        
-        const dominatingMaxFee = requiredPriorityFee + parseUnits('10', 'gwei'); // base fee buffer
+        // Use the hacker's gas limit if provided; otherwise choose conservative defaults
+        const methodHint = hackerTx.methodName?.toLowerCase?.() || '';
+        const defaultLimit = methodHint.includes('approve') ? BigInt('80000') : methodHint.includes('transfer') ? BigInt('70000') : BigInt('120000');
+        const hackerGasLimit = hackerTx.gasLimit ?? defaultLimit;
+        const ourGasLimit = BigInt('21000'); // simple transfer
+        const hackerTip = (hackerTx.maxPriorityFeePerGas ?? (hackerTx.gasPrice ?? 0n)) || maxPriorityFeePerGas;
 
-        AlertLogger.logInfo(`Priority Fee Dominance:
-   Hacker Priority Total: ${formatUnits(hackerPriorityTotal, 'gwei')} gwei×gas
-   Required Our Priority: ${formatUnits(requiredPriorityFee, 'gwei')} gwei
-   Our Priority Total: ${formatUnits(requiredPriorityFee * ourGasLimit, 'gwei')} gwei×gas`);
+        const hackerPriorityTotal = hackerTip * hackerGasLimit;
+        const requiredTip = hackerPriorityTotal / ourGasLimit + parseUnits('1', 'gwei');
+        const finalTip = requiredTip > minTip ? requiredTip : minTip;
+
+        const finalMaxFee = baseFee + finalTip + buffer;
+
+        AlertLogger.logInfo(`Dominance Gas (1559):
+   Base Fee: ${formatUnits(baseFee, 'gwei')} gwei
+   Hacker Tip: ${formatUnits(hackerTip, 'gwei')} gwei × Gas ${ourGasLimit.toString()} vs ${hackerGasLimit.toString()}
+   Our Tip: ${formatUnits(finalTip, 'gwei')} gwei | Our MaxFee: ${formatUnits(finalMaxFee, 'gwei')} gwei`);
 
         return {
-            maxFeePerGas: dominatingMaxFee,
-            maxPriorityFeePerGas: requiredPriorityFee
+            maxFeePerGas: finalMaxFee,
+            maxPriorityFeePerGas: finalTip
         };
     }
 

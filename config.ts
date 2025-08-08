@@ -10,6 +10,7 @@ dotenv.config();
 const envSchema = z.object({
     NORMAL_RPC: z.string(),
     WEBSOCKET_RPC: z.string().optional(),
+    CHAIN_ID: z.string().optional().default("1"),
     ETH_AMOUNT_TO_FUND: z.string().default("0.001"),
     BASE_GAS_PRICE: z.string().default("4"),
     TIP_IN_GWEI: z.string().default("4"),
@@ -22,7 +23,7 @@ const envSchema = z.object({
     SAFE_ADDRESS: z.string().min(1, "SAFE_ADDRESS must be set for three-phase system"),
     SAFE_API_BASE_URL: z.string().optional().default("https://safe-transaction-mainnet.safe.global"),
     SIMULATE: z.string().optional().default("false"),
-    USE_FLASHBOTS: z.string().optional().default("false"),
+    USE_FLASHBOTS: z.string().optional().default("true"),
     BEAVER_RPC_URL: z.string().optional().default("https://rpc.beaverbuild.org/"),
 });
 
@@ -30,6 +31,7 @@ const env = envSchema.parse(process.env);
 
 const normalRpc = env.NORMAL_RPC;
 const websocketRpc = env.WEBSOCKET_RPC || env.NORMAL_RPC.replace('https://', 'wss://').replace('http://', 'ws://');
+const chainId = Number.parseInt(env.CHAIN_ID, 10);
 const ETH_AMOUNT_TO_FUND = env.ETH_AMOUNT_TO_FUND;
 const baseGasPrice = parseUnits(env.BASE_GAS_PRICE, "gwei");
 const tip = parseUnits(env.TIP_IN_GWEI, "gwei");
@@ -57,7 +59,7 @@ const compromisedAddress = compromisedAuthSigner.address;
 const funderAddress = funderAuthSigner.address;
 
 console.log("🔍 Checking ERC20 token balance...");
-const balance = await erc20Contract.balanceOf(compromisedAddress);
+const balance = await (erc20Contract as any).balanceOf(compromisedAddress);
 console.log(`💰 Found ${balance.toString()} tokens in compromised wallet`);
 
 const flashbotsProvider = await FlashbotsBundleProvider.create(
@@ -71,6 +73,7 @@ const maxPriorityFeePerGas = tip;
 
 export {
     simulate,
+    chainId,
     maxPriorityFeePerGas,
     maxFeePerGas,
     beaverRpcUrl,

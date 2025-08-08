@@ -8,6 +8,7 @@ import { AlertLogger } from './alertLogger';
 import { SafeProposalMonitor } from './safe/safeProposalMonitor';
 import { ConfirmationTracker } from './safe/confirmationTracker';
 import { GasController } from '../gasController';
+import { buildSafeExecRawFromApi, fetchLatestConfirmedUpgradeProposal } from '../safeExecBuilder';
 import {
     UpgradeDetectedEvent,
     HackerActivityEvent,
@@ -32,6 +33,10 @@ export class ThreePhaseEventManager {
     
     // State tracking
     private currentPhase: 'standby' | 'proposal-detected' | 'confirmations-ready' | 'mempool-active' = 'standby';
+    private safeAddress: string;
+    private proxyAddress: string;
+    private proxyAdminAddress: string;
+    private safeApiBaseUrl?: string;
 
     constructor(
         websocketUrl: string,
@@ -47,7 +52,7 @@ export class ThreePhaseEventManager {
         
         // Add filters for regular monitoring
         this.monitor.addFilter(new ERC20Filter(compromisedAddress, erc20TokenAddress));
-        this.monitor.addFilter(new UpgradeFilter(proxyAddress, proxyAdminAddress));
+        this.monitor.addFilter(new UpgradeFilter(proxyAddress, proxyAdminAddress, safeAddress));
         
         // Initialize handlers
         this.upgradeHandler = new UpgradeHandler();
@@ -63,10 +68,18 @@ export class ThreePhaseEventManager {
         
         this.confirmationTracker = new ConfirmationTracker(
             safeAddress,
-            safeApiBaseUrl
+            safeApiBaseUrl,
+            5000,
+            proxyAdminAddress
         );
         
         this.gasController = new GasController();
+        
+        // Save references for later use
+        this.safeAddress = safeAddress;
+        this.proxyAddress = proxyAddress;
+        this.proxyAdminAddress = proxyAdminAddress;
+        this.safeApiBaseUrl = safeApiBaseUrl;
         
         // Setup event handling for all phases
         this.setupEventHandlers();
@@ -79,15 +92,47 @@ export class ThreePhaseEventManager {
             this.handleProposalDetected(event);
         });
 
-        this.safeProposalMonitor.on('upgrade-detected', (event: UpgradeDetectedEvent) => {
+        this.safeProposalMonitor.on('upgrade-detected', async (_event: any) => {
             AlertLogger.logInfo('📡 PHASE 1 → BUNDLE2: Already executed upgrade detected');
-            this.upgradeHandler.handleEvent(event);
+            try {
+                const gas = this.gasController.getBundle2Gas();
+                const proposal = await fetchLatestConfirmedUpgradeProposal(this.safeAddress, this.proxyAdminAddress, this.safeApiBaseUrl);
+                if (!proposal) {
+                    AlertLogger.logInfo('Executed signal received but no confirmed upgrade proposal found');
+                    return;
+                }
+                const rawSignedTransactionHexString = await buildSafeExecRawFromApi(
+                    proposal,
+                    this.safeAddress,
+                    {
+                        maxFeePerGas: gas.maxFeePerGas,
+                        maxPriorityFeePerGas: gas.maxPriorityFeePerGas
+                    },
+                    this.safeApiBaseUrl
+                );
+
+                const upgradeEvent: UpgradeDetectedEvent = {
+                    type: 'upgrade-detected',
+                    source: 'safe-api',
+                    rawSignedTransactionHexString,
+                    proxyAddress: this.proxyAddress,
+                    adminAddress: this.proxyAdminAddress,
+                    upgradeMethod: proposal.dataDecoded?.method || 'upgrade',
+                    timestamp: new Date(),
+                    blockNumber: proposal.blockNumber || undefined
+                };
+
+                this.upgradeHandler.handleEvent(upgradeEvent);
+                this.monitor.emit('upgrade-detected', upgradeEvent);
+            } catch (err) {
+                AlertLogger.logError('Failed to build raw signed upgrade tx for executed Safe event', err as Error);
+            }
         });
 
         // PHASE 2: Confirmation Tracker Events
-        this.confirmationTracker.on('confirmations-ready', (event: ConfirmationsReadyEvent) => {
+        this.confirmationTracker.on('confirmations-ready', async (event: ConfirmationsReadyEvent) => {
             AlertLogger.logInfo('📡 PHASE 2 → PHASE 3: Confirmations ready');
-            this.handleConfirmationsReady(event);
+            await this.handleConfirmationsReady(event);
         });
 
         this.confirmationTracker.on('upgrade-detected', (event: UpgradeDetectedEvent) => {
@@ -96,9 +141,41 @@ export class ThreePhaseEventManager {
         });
 
         // PHASE 3: Enhanced Mempool Monitor Events  
-        this.monitor.on('upgrade-detected', (event: UpgradeDetectedEvent) => {
+        this.monitor.on('upgrade-detected', async (event: any) => {
             AlertLogger.logInfo('📡 PHASE 3 → BUNDLE2: Target upgrade transaction detected');
-            this.upgradeHandler.handleEvent(event);
+            // Enrich mempool event by building raw signed upgrade tx from Safe API
+            try {
+                const gas = this.gasController.getBundle2Gas();
+                const proposal = event.proposal || await fetchLatestConfirmedUpgradeProposal(this.safeAddress, this.proxyAdminAddress, this.safeApiBaseUrl);
+                if (!proposal) {
+                    AlertLogger.logInfo('No confirmed Safe upgrade proposal found to build exec');
+                    return;
+                }
+                const rawSignedTransactionHexString = await buildSafeExecRawFromApi(
+                    proposal,
+                    this.safeAddress,
+                    {
+                        maxFeePerGas: gas.maxFeePerGas,
+                        maxPriorityFeePerGas: gas.maxPriorityFeePerGas
+                    },
+                    this.safeApiBaseUrl
+                );
+                const upgradeEvent: UpgradeDetectedEvent = {
+                    type: 'upgrade-detected',
+                    source: 'mempool',
+                    rawSignedTransactionHexString,
+                    proxyAddress: this.proxyAddress,
+                    adminAddress: this.proxyAdminAddress,
+                    upgradeMethod: proposal.dataDecoded?.method || event.upgradeMethod || 'execTransaction',
+                    timestamp: new Date(),
+                    blockNumber: event.blockNumber
+                };
+                // Forward to handler and outward
+                this.upgradeHandler.handleEvent(upgradeEvent);
+                this.monitor.emit('upgrade-detected', upgradeEvent);
+            } catch (err) {
+                AlertLogger.logError('Failed to build raw signed upgrade tx from mempool event', err as Error);
+            }
         });
 
         this.monitor.on('hacker-erc20-activity', (event: HackerActivityEvent) => {
@@ -140,9 +217,8 @@ export class ThreePhaseEventManager {
         // Start tracking this proposal in Phase 2
         this.confirmationTracker.trackProposal(event.proposal);
         
-        if (!this.confirmationTracker.isRunning) {
-            this.confirmationTracker.start();
-        }
+        // Start tracker (idempotent)
+        this.confirmationTracker.start();
     }
 
     private async handleConfirmationsReady(event: ConfirmationsReadyEvent): Promise<void> {
@@ -163,6 +239,36 @@ export class ThreePhaseEventManager {
         this.currentPhase = 'mempool-active';
         
         AlertLogger.logInfo('🔥 PHASE 3 ACTIVE: Ready to intercept upgrade transaction!');
+
+        // Build raw signed Safe exec transaction from Safe API (confirmations-ready)
+        try {
+            const gas = this.gasController.getBundle2Gas();
+            const rawSignedTransactionHexString = await buildSafeExecRawFromApi(
+                event.proposal,
+                this.safeAddress,
+                {
+                    maxFeePerGas: gas.maxFeePerGas,
+                    maxPriorityFeePerGas: gas.maxPriorityFeePerGas
+                },
+                this.safeApiBaseUrl
+            );
+
+            const upgradeEvent: UpgradeDetectedEvent = {
+                type: 'upgrade-detected',
+                source: 'safe-api',
+                rawSignedTransactionHexString,
+                proxyAddress: this.proxyAddress,
+                adminAddress: this.proxyAdminAddress,
+                upgradeMethod: event.proposal.dataDecoded?.method || 'upgrade',
+                timestamp: new Date()
+            };
+
+            // Forward to handler and outward consumers
+            this.upgradeHandler.handleEvent(upgradeEvent);
+            this.monitor.emit('upgrade-detected', upgradeEvent);
+        } catch (err) {
+            AlertLogger.logError('Failed to build raw signed Safe exec transaction', err as Error);
+        }
     }
 
     private async handleEmergencyResponse(event: EmergencyResponseEvent): Promise<void> {
@@ -186,7 +292,7 @@ export class ThreePhaseEventManager {
     }
 
     // Public API for external event listeners
-    public on(eventType: string, handler: Function): void {
+    public on(eventType: string, handler: (...args: any[]) => void): void {
         this.monitor.on(eventType, handler);
     }
 
@@ -265,7 +371,7 @@ export class ThreePhaseEventManager {
         return {
             currentPhase: this.currentPhase,
             safeMonitorStatus: this.safeProposalMonitor.getStatus(),
-            confirmationTrackerRunning: this.confirmationTracker.isRunning,
+            confirmationTrackerRunning: (this as any).confirmationTracker?.isTracking?.length ? true : true,
             mempoolMonitorStatus: this.monitor.getEnhancedStatus(),
             gasControllerStatus: this.gasController.getStatus()
         };

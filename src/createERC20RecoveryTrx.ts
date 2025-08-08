@@ -1,6 +1,6 @@
 import { formatUnits, formatEther } from "ethers";
 import { TransactionEntry } from "./types";
-import { erc20Contract, balance, funderAddress, erc20TokenAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, compromisedAddress } from "../config";
+import { erc20Contract, balance, funderAddress, erc20TokenAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, compromisedAddress, chainId } from "../config";
 
 export const createERC20RecoveryTrx = (amount: bigint): TransactionEntry => {
     console.log("   🪙 Creating ERC20 recovery transaction...");
@@ -25,7 +25,7 @@ export const createERC20RecoveryTrx = (amount: bigint): TransactionEntry => {
     console.log(`      Purpose: Transfer all ERC20 tokens to funder address`);
     
     const recoveryTrx = {
-        chainId: 1,
+        chainId: chainId,
         type: 2,
         value: 0,
         to: erc20TokenAddress,

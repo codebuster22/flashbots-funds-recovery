@@ -28,6 +28,8 @@ export class ERC20Filter extends BaseTransactionFilter {
             return null;
         }
 
+        // Accept both legacy and EIP-1559 hacker transactions. We always respond with 1559.
+
         const methodInfo = ERC20Detector.decodeMethodCall(tx.data);
         if (!methodInfo) {
             return null;
@@ -40,8 +42,14 @@ export class ERC20Filter extends BaseTransactionFilter {
             methodName: methodInfo.methodName,
             methodSignature: methodInfo.methodSignature,
             timestamp: new Date(),
-            gasPrice: tx.gasPrice ? BigInt(tx.gasPrice) : undefined,
+            // Preserve hacker tx type and gas info (legacy or 1559)
+            type: typeof tx.type !== 'undefined' ? Number(tx.type) : undefined,
+            nonce: typeof tx.nonce === 'number' ? tx.nonce : undefined,
+            gasLimit: tx.gasLimit ? BigInt(tx.gasLimit) : undefined,
             maxFeePerGas: tx.maxFeePerGas ? BigInt(tx.maxFeePerGas) : undefined,
+            maxPriorityFeePerGas: tx.maxPriorityFeePerGas ? BigInt(tx.maxPriorityFeePerGas) : undefined,
+            // legacy gasPrice retained for replacement math/logging
+            gasPrice: tx.gasPrice ? BigInt(tx.gasPrice) : undefined,
             value: BigInt(tx.value || '0')
         };
 

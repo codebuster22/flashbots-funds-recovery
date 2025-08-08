@@ -1,6 +1,6 @@
 import { formatEther, formatUnits, parseUnits } from "ethers";
 import { TransactionEntry } from "./types";
-import { normalProvider, compromisedAddress, funderAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, ETH_AMOUNT_TO_FUND } from "../config";
+import { normalProvider, compromisedAddress, funderAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, ETH_AMOUNT_TO_FUND, chainId } from "../config";
 
 export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEntry> => {
     console.log("   💸 Creating ETH withdrawal transaction...");
@@ -46,7 +46,7 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEnt
         value: maxEthToSendBack,
         maxFeePerGas: maxFeePerGas,
         maxPriorityFeePerGas: maxPriorityFeePerGas,
-        chainId: 1,
+        chainId: chainId,
         type: 2,
         gasLimit: gasLimit
     }

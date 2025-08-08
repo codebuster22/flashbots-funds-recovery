@@ -27,7 +27,7 @@ console.log("=" .repeat(50));
 // Log configuration
 console.log("📋 Configuration:");
 console.log(`   Mode: ${simulate ? "🧪 SIMULATION" : "⚡ PRODUCTION"}`);
-console.log(`   Builder: ${useFlashBots ? "🔥 Flashbots" : "🦫 Beaver Build"}`);
+    console.log(`   Builder: 🔥 Flashbots`);
 console.log(`   Funder Address: ${funderAddress}`);
 console.log(`   Compromised Address: ${compromisedAddress}`);
 console.log(`   ERC20 Token: ${erc20TokenAddress}`);
@@ -72,12 +72,7 @@ if (simulate) {
         console.log("🧪 Running bundle simulation...");
         await simulateBundle(signedBundle);
 
-        if (useFlashBots) {
-            console.log("🔥 Sending bundle to Flashbots...");
-            await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
-        } else {
-            console.log("🦫 Sending bundle to Beaver Build...");
-            await sendBundleToBeaver(signedBundle, BigInt(targetBlockNumber));
-        }
+        console.log("🔥 Sending bundle to Flashbots...");
+        await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
     });
 }

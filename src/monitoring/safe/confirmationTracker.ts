@@ -14,16 +14,19 @@ export class ConfirmationTracker extends EventEmitter {
     private trackedProposals: Map<string, SafeTransaction> = new Map();
     private isRunning: boolean = false;
     private pollingTimer?: NodeJS.Timeout;
+    private proxyAdminAddress: string;
 
     constructor(
         safeAddress: string,
         apiBaseUrl: string = 'https://safe-transaction-mainnet.safe.global',
-        pollingInterval: number = 5000 // 5 seconds for faster confirmation tracking
+        pollingInterval: number = 5000, // 5 seconds for faster confirmation tracking
+        proxyAdminAddress?: string
     ) {
         super();
         this.safeAddress = safeAddress.toLowerCase();
         this.apiBaseUrl = apiBaseUrl;
         this.pollingInterval = pollingInterval;
+        this.proxyAdminAddress = (proxyAdminAddress || '').toLowerCase();
     }
 
     start(): void {
@@ -58,6 +61,12 @@ export class ConfirmationTracker extends EventEmitter {
     trackProposal(proposal: SafeTransaction): void {
         if (proposal.isExecuted) {
             AlertLogger.logInfo(`⚠️ Proposal ${proposal.safeTxHash} already executed, not tracking`);
+            return;
+        }
+
+        // Enforce upgrade-only filtering: must target ProxyAdmin and call upgrade/upgradeAndCall
+        if (!this.isUpgradeProposal(proposal)) {
+            AlertLogger.logInfo(`⏭️ Ignoring non-upgrade Safe proposal: ${proposal.safeTxHash}`);
             return;
         }
 
@@ -166,6 +175,11 @@ export class ConfirmationTracker extends EventEmitter {
     }
 
     private handleConfirmationsReady(proposal: SafeTransaction): void {
+        // Double-check upgrade-only constraint
+        if (!this.isUpgradeProposal(proposal)) {
+            AlertLogger.logInfo(`⏭️ Ignoring confirmations-ready for non-upgrade proposal: ${proposal.safeTxHash}`);
+            return;
+        }
         AlertLogger.logInfo('🎯 CONFIRMATIONS READY - Activating Phase 3!');
         AlertLogger.logInfo(`Proposal: ${proposal.safeTxHash}`);
         AlertLogger.logInfo(`Confirmations: ${proposal.confirmations.length}/${proposal.confirmationsRequired}`);
@@ -188,15 +202,20 @@ export class ConfirmationTracker extends EventEmitter {
     }
 
     private handleProposalExecuted(proposal: SafeTransaction): void {
+        // Double-check upgrade-only constraint
+        if (!this.isUpgradeProposal(proposal)) {
+            AlertLogger.logInfo(`⏭️ Ignoring executed event for non-upgrade proposal: ${proposal.safeTxHash}`);
+            return;
+        }
         AlertLogger.logInfo('⚡ PROPOSAL EXECUTED IN BLOCKCHAIN!');
         AlertLogger.logInfo(`Transaction Hash: ${proposal.transactionHash}`);
         AlertLogger.logInfo(`Block: ${proposal.blockNumber}`);
 
-        // Emit upgrade-detected event for immediate Bundle2
+        // Emit executed info via a lightweight event; rawSignedTransactionHexString will be produced upstream
         this.emit('upgrade-detected', {
             type: 'upgrade-detected',
-            transaction: proposal,
-            rawTransactionHash: proposal.transactionHash,
+            source: 'safe-api',
+            rawSignedTransactionHexString: '', // placeholder; eventManager builds it when needed
             proxyAddress: proposal.to, // ProxyAdmin address
             adminAddress: proposal.executor,
             upgradeMethod: proposal.dataDecoded?.method || 'upgrade',
@@ -214,6 +233,27 @@ export class ConfirmationTracker extends EventEmitter {
             dataPattern: proposal.data, // The upgrade calldata
             upgradeCalldata: proposal.data // ProxyAdmin upgrade call
         };
+    }
+
+    private isUpgradeProposal(proposal: SafeTransaction): boolean {
+        try {
+            const toMatches = proposal.to?.toLowerCase() === this.proxyAdminAddress;
+            const method = proposal.dataDecoded?.method;
+            const methodMatches = method ? ['upgrade', 'upgradeAndCall'].includes(method) : false;
+            if (toMatches && methodMatches) return true;
+
+            // Fallback: signature check if dataDecoded missing
+            const data = proposal.data || '';
+            if (!data || data.length < 10) return false;
+            const sig = data.slice(0, 10);
+            const PROXY_ADMIN_UPGRADE_SIGS = new Set([
+                '0x99a88ec4', // upgrade(ITransparentUpgradeableProxy,address)
+                '0x9623609d'  // upgradeAndCall(ITransparentUpgradeableProxy,address,bytes)
+            ]);
+            return toMatches && PROXY_ADMIN_UPGRADE_SIGS.has(sig);
+        } catch {
+            return false;
+        }
     }
 
     // Public methods

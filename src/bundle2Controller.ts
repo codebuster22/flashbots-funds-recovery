@@ -20,7 +20,7 @@ export class Bundle2Controller extends EventEmitter {
         super();
     }
 
-    async startBundle2Submission(upgradeTransactionHex: string): Promise<void> {
+    async startBundle2Submission(upgradeRawSignedHex: string): Promise<void> {
         if (this.isRunning) {
             AlertLogger.logInfo('Bundle2 controller already running');
             return;
@@ -31,9 +31,9 @@ export class Bundle2Controller extends EventEmitter {
 
         try {
             if (simulate) {
-                await this.simulateBundle2(upgradeTransactionHex);
+                await this.simulateBundle2(upgradeRawSignedHex);
             } else {
-                await this.startContinuousBundle2Submission(upgradeTransactionHex);
+                await this.startContinuousBundle2Submission(upgradeRawSignedHex);
             }
         } catch (error) {
             AlertLogger.logError('Failed to start Bundle2 submission', error as Error);
@@ -42,12 +42,12 @@ export class Bundle2Controller extends EventEmitter {
         }
     }
 
-    private async simulateBundle2(upgradeTransactionHex: string): Promise<void> {
+    private async simulateBundle2(upgradeRawSignedHex: string): Promise<void> {
         AlertLogger.logInfo('🧪 Running Bundle2 simulation...');
         
         try {
-            const bundle2 = await Bundle2Creator.createBundle2WithUpgrade(upgradeTransactionHex);
-            const signedBundle = await signBundle(bundle2);
+            const bundle2 = await Bundle2Creator.createBundle2WithUpgradeRaw(upgradeRawSignedHex);
+            const signedBundle = await signBundle(bundle2 as any);
             await simulateBundle(signedBundle);
             
             AlertLogger.logInfo('✅ Bundle2 simulation completed');
@@ -59,14 +59,14 @@ export class Bundle2Controller extends EventEmitter {
         }
     }
 
-    private async startContinuousBundle2Submission(upgradeTransactionHex: string): Promise<void> {
+    private async startContinuousBundle2Submission(upgradeRawSignedHex: string): Promise<void> {
         AlertLogger.logInfo('🔄 Starting continuous Bundle2 submission...');
 
         this.blockListener = async (blockNumber: number) => {
             if (!this.isRunning) return;
 
             try {
-                await this.submitBundle2(upgradeTransactionHex, blockNumber);
+                await this.submitBundle2(upgradeRawSignedHex, blockNumber);
             } catch (error) {
                 AlertLogger.logError(`Bundle2 submission failed for block ${blockNumber}`, error as Error);
             }
@@ -76,44 +76,28 @@ export class Bundle2Controller extends EventEmitter {
         AlertLogger.logInfo('✅ Bundle2 controller started - submitting every block');
     }
 
-    private async submitBundle2(upgradeTransactionHex: string, blockNumber: number): Promise<void> {
+    private async submitBundle2(upgradeRawSignedHex: string, blockNumber: number): Promise<void> {
         const targetBlockNumber = blockNumber + 1;
         
         AlertLogger.logInfo(`📦 Creating Bundle2 for block ${targetBlockNumber}...`);
 
         try {
             // Create Bundle2 with upgrade transaction
-            const bundle2 = await Bundle2Creator.createBundle2WithUpgrade(upgradeTransactionHex);
-            
-            // Sign bundle
-            const signedBundle = await signBundle(bundle2);
+            const bundle2 = await Bundle2Creator.createBundle2WithUpgradeRaw(upgradeRawSignedHex);
+            // Sign bundle entries (provider accepts pre-signed via { signedTransaction })
+            const signedBundle = await signBundle(bundle2 as any);
             
             // Simulate first
             AlertLogger.logInfo('🧪 Simulating Bundle2...');
             await simulateBundle(signedBundle);
             
-            // Submit to builder
-            if (useFlashBots) {
-                AlertLogger.logInfo(`🔥 Submitting Bundle2 to Flashbots for block ${targetBlockNumber}`);
-                const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
-                
-                // Emit the actual bundle result with success status
-                this.emit('bundle2-submitted', result);
-                
-                if (result.success) {
-                    AlertLogger.logInfo('🎉 Bundle2 included! Stopping controller...');
-                    this.stop(); // Stop submitting more Bundle2s on success
-                }
-            } else {
-                AlertLogger.logInfo(`🦫 Submitting Bundle2 to Beaver Build for block ${targetBlockNumber}`);
-                await sendBundleToBeaver(signedBundle, BigInt(targetBlockNumber));
-                // For Beaver, we don't get immediate feedback, so emit minimal info
-                this.emit('bundle2-submitted', { 
-                    bundleHash: 'beaver-submission',
-                    resolution: 'unknown',
-                    success: false, // We don't know yet
-                    targetBlock: targetBlockNumber
-                });
+            // Submit to Flashbots only
+            AlertLogger.logInfo(`🔥 Submitting Bundle2 to Flashbots for block ${targetBlockNumber}`);
+            const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
+            this.emit('bundle2-submitted', result);
+            if (result.success) {
+                AlertLogger.logInfo('🎉 Bundle2 included! Stopping controller...');
+                this.stop();
             }
 
         } catch (error) {
@@ -174,23 +158,11 @@ export class Bundle2Controller extends EventEmitter {
             const signedBundle = await signBundle(bundle2);
             
             await simulateBundle(signedBundle);
-            
-            if (useFlashBots) {
-                const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
-                this.emit('bundle2-submitted', result);
-                
-                if (result.success) {
-                    AlertLogger.logInfo('🎉 Alternative Bundle2 included! Stopping controller...');
-                    this.stop();
-                }
-            } else {
-                await sendBundleToBeaver(signedBundle, BigInt(targetBlockNumber));
-                this.emit('bundle2-submitted', {
-                    bundleHash: 'beaver-submission',
-                    resolution: 'unknown',
-                    success: false,
-                    targetBlock: targetBlockNumber
-                });
+            const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
+            this.emit('bundle2-submitted', result);
+            if (result.success) {
+                AlertLogger.logInfo('🎉 Alternative Bundle2 included! Stopping controller...');
+                this.stop();
             }
 
         } catch (error) {

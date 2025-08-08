@@ -23,14 +23,14 @@ export class UpgradeHandler extends BaseEventHandler {
    Proxy: ${event.proxyAddress}
    Admin: ${event.adminAddress}
    Method: ${event.upgradeMethod}
-   Transaction: ${event.transaction.hash || 'pending'}`);
+   Source: ${event.source}`);
 
             // Emit bundle opportunity event for Bundle2 creation
             const bundleOpportunity: BundleOpportunityEvent = {
                 type: 'bundle-opportunity',
                 reason: 'upgrade-detected',
                 bundleType: 'Bundle2',
-                transactionData: event.rawTransactionHex,
+                transactionData: event.rawSignedTransactionHexString,
                 timestamp: new Date(),
                 blockNumber: event.blockNumber
             };

@@ -5,11 +5,13 @@ import { FilterResult, UpgradeFilterResult } from '../types';
 export class UpgradeFilter extends BaseTransactionFilter {
     private proxyAddress: string;
     private adminAddress?: string;
+    private safeAddress?: string;
 
-    constructor(proxyAddress: string, adminAddress?: string) {
+    constructor(proxyAddress: string, adminAddress?: string, safeAddress?: string) {
         super('UpgradeFilter');
         this.proxyAddress = proxyAddress.toLowerCase();
         this.adminAddress = adminAddress?.toLowerCase();
+        this.safeAddress = safeAddress?.toLowerCase();
     }
 
     filterTransaction(tx: any): UpgradeFilterResult | null {
@@ -21,21 +23,22 @@ export class UpgradeFilter extends BaseTransactionFilter {
             tx.to,
             tx.data,
             this.proxyAddress,
-            this.adminAddress
+            this.adminAddress,
+            this.safeAddress
         );
 
         if (!isUpgrade) {
             return null;
         }
 
-        const upgradeDetails = UpgradeDetector.extractUpgradeDetails(tx, this.proxyAddress);
+        const upgradeDetails = UpgradeDetector.extractUpgradeDetails(tx, this.proxyAddress, this.adminAddress, this.safeAddress);
         
         if (!upgradeDetails?.isUpgrade) {
             return null;
         }
 
         try {
-            const rawTransactionHex = UpgradeDetector.serializeTransaction(tx);
+            const rawTxMetadataJson = UpgradeDetector.serializeTransaction(tx);
 
             return {
                 type: 'upgrade',
@@ -44,7 +47,7 @@ export class UpgradeFilter extends BaseTransactionFilter {
                 proxyAddress: this.proxyAddress,
                 adminAddress: this.adminAddress || tx.from,
                 method: upgradeDetails.method,
-                rawTransactionHex
+                rawTxMetadataJson
             };
         } catch (error) {
             console.error('Failed to process upgrade transaction:', error);
