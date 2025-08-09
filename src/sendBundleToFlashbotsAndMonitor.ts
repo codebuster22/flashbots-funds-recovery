@@ -6,6 +6,7 @@ interface BundleSubmissionResult {
     resolution: FlashbotsBundleResolution;
     success: boolean;
     targetBlock: number;
+    includedTransactions?: string[]; // Individual transaction hashes if bundle was included
 }
 
 export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string>, targetBlockNumber: number): Promise<BundleSubmissionResult> => {
@@ -46,6 +47,17 @@ export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string
         
         if (waitResponse === FlashbotsBundleResolution.BundleIncluded) {
             console.log(`🎉 SUCCESS: Bundle (${signedBundle.length} trx) included in block ${targetBlockNumber}!`);
+            
+            // Extract transaction hashes for success monitoring
+            try {
+                const bundleStats = await flashbotsProvider.getBundleStats(bundleReceipt.bundleHash, targetBlockNumber);
+                if (bundleStats && 'isIncluded' in bundleStats && bundleStats.isIncluded && 'receipts' in bundleStats && Array.isArray(bundleStats.receipts)) {
+                    result.includedTransactions = bundleStats.receipts.map((receipt: any) => receipt.transactionHash);
+                    console.log(`   📋 Included transaction hashes: ${result.includedTransactions?.join(', ')}`);
+                }
+            } catch (error) {
+                console.log(`   ⚠️ Could not extract transaction hashes: ${error instanceof Error ? error.message : String(error)}`);
+            }
         } else if (waitResponse === FlashbotsBundleResolution.BlockPassedWithoutInclusion) {
             console.log(`⚠️  Bundle (${signedBundle.length} trx) not included in block ${targetBlockNumber} - block passed`);
             const stats = await flashbotsProvider.getBundleStats(bundleReceipt.bundleHash, targetBlockNumber);

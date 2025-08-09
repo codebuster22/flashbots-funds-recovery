@@ -29,6 +29,8 @@ const envSchema = z.object({
     UPPER_BOUND_GAS_PRICE: z.string().default("100"),
     UPPER_BOUND_MAX_FEE_PER_GAS: z.string().default("100"),
     UPPER_BOUND_MAX_PRIORITY_FEE: z.string().default("50"),
+    WEBHOOK_URL: z.string().optional(),
+    CONSECUTIVE_SKIP_THRESHOLD: z.string().default("5"),
 });
 
 const env = envSchema.parse(process.env);
@@ -42,6 +44,8 @@ const tip = parseUnits(env.TIP_IN_GWEI, "gwei");
 const upperBoundGasPrice = parseUnits(env.UPPER_BOUND_GAS_PRICE, "gwei");
 const upperBoundMaxFeePerGas = parseUnits(env.UPPER_BOUND_MAX_FEE_PER_GAS, "gwei");
 const upperBoundMaxPriorityFee = parseUnits(env.UPPER_BOUND_MAX_PRIORITY_FEE, "gwei");
+const webhookUrl = env.WEBHOOK_URL;
+const consecutiveSkipThreshold = parseInt(env.CONSECUTIVE_SKIP_THRESHOLD);
 const flashbotsRpc = env.FLASHBOTS_RPC;
 const funderKey = env.FUNDER_PRIVATE_KEY;
 const compromisedKey = env.COMPROMISED_PRIVATE_KEY;
@@ -104,5 +108,7 @@ export {
     upperBoundGasPrice,
     upperBoundMaxFeePerGas,
     upperBoundMaxPriorityFee,
-    websocketRpc
+    websocketRpc,
+    webhookUrl,
+    consecutiveSkipThreshold
 }

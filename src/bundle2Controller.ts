@@ -78,6 +78,7 @@ export class Bundle2Controller extends EventEmitter {
 
     private async submitBundle2(upgradeRawSignedHex: string, blockNumber: number): Promise<void> {
         const targetBlockNumber = blockNumber + 1;
+        let bundleSubmitted = false;
         
         AlertLogger.logInfo(`📦 Creating Bundle2 for block ${targetBlockNumber}...`);
 
@@ -92,20 +93,34 @@ export class Bundle2Controller extends EventEmitter {
             const simulationResult = await simulateBundle(signedBundle);
             if (!simulationResult) {
                 AlertLogger.logInfo('❌ Simulation failed, skipping bundle2 submission...');
+                this.emit('bundle2-skipped', { blockNumber, reason: 'simulation-failed' });
                 return;
             }
             
             // Submit to Flashbots only
             AlertLogger.logInfo(`🔥 Submitting Bundle2 to Flashbots for block ${targetBlockNumber}`);
             const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
+            bundleSubmitted = true; // Successfully submitted
+            
             this.emit('bundle2-submitted', result);
             if (result.success) {
                 AlertLogger.logInfo('🎉 Bundle2 included! Stopping controller...');
+                
+                // Emit transaction hashes for success monitoring
+                if (result.includedTransactions) {
+                    this.emit('bundle2-success', { transactionHashes: result.includedTransactions });
+                }
+                
                 this.stop();
             }
 
         } catch (error) {
             AlertLogger.logError(`Bundle2 creation/submission failed for block ${targetBlockNumber}`, error as Error);
+            bundleSubmitted = false;
+            this.emit('bundle2-skipped', { blockNumber, reason: error instanceof Error ? error.message : String(error) });
+        } finally {
+            // Emit submission attempt result for skip tracking
+            this.emit('bundle2-attempt', { blockNumber, submitted: bundleSubmitted });
         }
     }
 

@@ -31,7 +31,7 @@ import { signBundle } from "./src/signBundle";
 import { simulateBundle } from "./src/simulateBundle";
 import { sendBundleToFlashbotsAndMonitor } from "./src/sendBundleToFlashbotsAndMonitor";
 import { sendBundleToBeaver } from "./src/sendBundleToBeaver";
-import { normalProvider } from "./config";
+import { normalProvider, webhookUrl, consecutiveSkipThreshold } from "./config";
 import { formatEther, formatUnits, FeeData } from "ethers";
 import { updateGasConfig } from "./src/gasController";
 
@@ -50,6 +50,10 @@ class MasterOrchestrator {
     // Aggressive mode tracking
     private aggressiveModeStartBlock: number = 0;
     private lastProcessedBlock: number = 0;
+    
+    // Skip monitoring
+    private consecutiveSkips: number = 0;
+    private lastSubmissionAttemptBlock: number = 0;
 
     constructor() {
         // Ensure required addresses are provided for three-phase system
@@ -126,6 +130,21 @@ class MasterOrchestrator {
                 AlertLogger.logInfo(`✅ Defensive action completed: ${event.type}`);
                 // Continue other strategies for defensive actions
             }
+        });
+
+        // Bundle2 success monitoring
+        this.bundle2Controller.on('bundle2-success', (event) => {
+            if (this.recoverySucceeded) return;
+            
+            AlertLogger.logInfo('🎉 Bundle2 success detected - adding transactions to success monitoring');
+            for (const txHash of event.transactionHashes) {
+                this.successMonitor.addTransactionToMonitor(txHash, 'bundle2');
+            }
+        });
+
+        // Bundle2 skip monitoring
+        this.bundle2Controller.on('bundle2-attempt', (event) => {
+            this.trackSubmissionAttempt(event.blockNumber, event.submitted, 'bundle2');
         });
 
         // Bundle2 submission tracking
@@ -258,6 +277,7 @@ class MasterOrchestrator {
 
     private async submitBundle1(blockNumber: number): Promise<void> {
         const targetBlockNumber = blockNumber + 1;
+        let bundleSubmitted = false;
         
         try {
             const bundle1 = await this.createBundle1();
@@ -268,18 +288,34 @@ class MasterOrchestrator {
             
             // Submit to Flashbots
             const result = await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);
+            bundleSubmitted = true; // Successfully submitted (regardless of inclusion)
+            
             if (result.success) {
                 AlertLogger.logInfo(`🎉 Bundle1 included in block ${result.targetBlock}!`);
+                
+                // Add successful bundle transactions to success monitoring
+                if (result.includedTransactions) {
+                    for (const txHash of result.includedTransactions) {
+                        this.successMonitor.addTransactionToMonitor(txHash, 'bundle1');
+                    }
+                }
+                
                 // Bundle1 success means tokens were recovered - trigger success handling
                 this.handleRecoverySuccess();
                 return; // Exit early on success
             }
 
         } catch (error) {
+            // Bundle submission failed
+            bundleSubmitted = false;
+            
             // Silently continue - Bundle1 failures are expected until tokens unlock
             if (blockNumber % 10 === 0) { // Log every 10 blocks to avoid spam
                 AlertLogger.logInfo(`Bundle1 continuing (block ${blockNumber})...`);
             }
+        } finally {
+            // Track skip monitoring
+            this.trackSubmissionAttempt(blockNumber, bundleSubmitted, 'bundle1');
         }
     }
 
@@ -399,6 +435,71 @@ class MasterOrchestrator {
 
     private applyUpperBounds(gas: bigint, upperBound: bigint): bigint {
         return gas > upperBound ? upperBound : gas;
+    }
+
+    private trackSubmissionAttempt(blockNumber: number, bundleSubmitted: boolean, bundleType: string): void {
+        if (bundleSubmitted) {
+            // Reset consecutive skip counter on successful submission
+            if (this.consecutiveSkips > 0) {
+                AlertLogger.logDebug(`✅ Bundle submission successful - resetting skip counter (was ${this.consecutiveSkips})`);
+                this.consecutiveSkips = 0;
+            }
+            this.lastSubmissionAttemptBlock = blockNumber;
+        } else {
+            // Increment skip counter
+            this.consecutiveSkips++;
+            
+            AlertLogger.logDebug(`⚠️ Bundle skip detected - consecutive skips: ${this.consecutiveSkips}/${consecutiveSkipThreshold}`);
+            
+            // Check if we've hit the threshold
+            if (this.consecutiveSkips >= consecutiveSkipThreshold) {
+                const message = `🚨 ALERT: ${this.consecutiveSkips} consecutive bundles skipped!`;
+                const data = {
+                    consecutiveSkips: this.consecutiveSkips,
+                    lastSubmissionBlock: this.lastSubmissionAttemptBlock,
+                    currentBlock: blockNumber,
+                    bundleType: bundleType,
+                    threshold: consecutiveSkipThreshold
+                };
+                
+                AlertLogger.logError(message);
+                AlertLogger.logError(`Last successful submission: block ${this.lastSubmissionAttemptBlock}`);
+                AlertLogger.logError(`Current block: ${blockNumber}`);
+                
+                // Send webhook alert
+                this.sendWebhookAlert(message, data);
+            }
+        }
+    }
+
+    private async sendWebhookAlert(message: string, data?: any): Promise<void> {
+        if (!webhookUrl) {
+            AlertLogger.logDebug('Webhook URL not configured - skipping alert');
+            return;
+        }
+
+        try {
+            const payload = {
+                alert: message,
+                timestamp: new Date().toISOString(),
+                system: 'flashbots-recovery',
+                data: data || {}
+            };
+
+            const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                AlertLogger.logInfo(`📡 Webhook alert sent: ${message}`);
+            } else {
+                AlertLogger.logError(`Webhook failed with status ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            AlertLogger.logError('Failed to send webhook alert', error as Error);
+        }
     }
 
     private async startAggressiveBundle1(): Promise<void> {
