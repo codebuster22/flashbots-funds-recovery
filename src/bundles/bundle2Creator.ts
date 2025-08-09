@@ -5,14 +5,12 @@ import {
     funderAuthSigner,
     erc20TokenAddress,
     ETH_AMOUNT_TO_FUND,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
     balance,
     normalProvider
 } from '../../config';
 import { createFundingTrx } from '../createFundingTrx';
 import { createERC20RecoveryTrx } from '../createERC20RecoveryTrx';
-import { createWithdrawTrx } from '../createWithdrawTrx';
+import { createWithdrawTrx, WithdrawTrxResult } from '../createWithdrawTrx';
 
 export class Bundle2Creator {
 
@@ -27,17 +25,22 @@ export class Bundle2Creator {
         const recoveryTx = createERC20RecoveryTrx(balance);
 
         AlertLogger.logInfo('Creating withdrawal transaction...');
-        const withdrawTx = await createWithdrawTrx();
+        const withdrawResult = await createWithdrawTrx();
 
         const bundle2: ({ signedTransaction: string } | TransactionEntry)[] = [
             { signedTransaction: upgradeRawSignedHex }, // First: Safe exec upgrade (raw signed hex)
             fundingTx,           // Second: Fund compromised wallet
             recoveryTx,          // Third: Transfer tokens out
-            withdrawTx           // Fourth: Return remaining ETH
         ];
 
-        AlertLogger.logInfo(`✅ Bundle2 created with ${bundle2.length} transactions`);
-        AlertLogger.logInfo('Transaction order: Upgrade → Fund → Recover → Withdraw');
+        if (withdrawResult.shouldInclude) {
+            bundle2.push(withdrawResult.transaction!); // Fourth: Return remaining ETH
+            AlertLogger.logInfo(`✅ Bundle2 created with ${bundle2.length} transactions`);
+            AlertLogger.logInfo('Transaction order: Upgrade → Fund → Recover → Withdraw');
+        } else {
+            AlertLogger.logInfo(`⚠️ Bundle2 created with ${bundle2.length} transactions (withdrawal excluded: ${withdrawResult.reason})`);
+            AlertLogger.logInfo('Transaction order: Upgrade → Fund → Recover');
+        }
 
         return bundle2;
     }
@@ -49,9 +52,17 @@ export class Bundle2Creator {
         try {
             const fundingTx = createFundingTrx();
             const recoveryTx = createERC20RecoveryTrx(balance);
-            const withdrawTx = await createWithdrawTrx();
+            const withdrawResult = await createWithdrawTrx();
             
-            return [fundingTx, recoveryTx, withdrawTx];
+            const bundle = [fundingTx, recoveryTx];
+            if (withdrawResult.shouldInclude) {
+                bundle.push(withdrawResult.transaction!);
+                AlertLogger.logInfo(`✅ Alternative Bundle2 created with ${bundle.length} transactions (including withdrawal)`);
+            } else {
+                AlertLogger.logInfo(`⚠️ Alternative Bundle2 created with ${bundle.length} transactions (withdrawal excluded: ${withdrawResult.reason})`);
+            }
+            
+            return bundle;
             
         } catch (error) {
             AlertLogger.logError('Failed to create alternative Bundle2', error as Error);

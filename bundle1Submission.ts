@@ -6,8 +6,6 @@ import {
     funderAddress,
     erc20TokenAddress,
     ETH_AMOUNT_TO_FUND,
-    tip,
-    baseGasPrice,
     flashbotsProvider,
     normalProvider,
 } from "./config";
@@ -18,7 +16,6 @@ import { signBundle } from "./src/signBundle";
 import { simulateBundle } from "./src/simulateBundle";
 import { sendBundleToFlashbotsAndMonitor } from "./src/sendBundleToFlashbotsAndMonitor";
 import { sendBundleToBeaver } from "./src/sendBundleToBeaver";
-import { getTargetBlock } from "./src/getTargetBlock";
 import { formatEther, formatUnits } from "ethers";
 
 console.log("🚀 Starting Flashbots Fund Recovery Bot");
@@ -32,8 +29,7 @@ console.log(`   Funder Address: ${funderAddress}`);
 console.log(`   Compromised Address: ${compromisedAddress}`);
 console.log(`   ERC20 Token: ${erc20TokenAddress}`);
 console.log(`   ETH to Fund: ${ETH_AMOUNT_TO_FUND} ETH`);
-console.log(`   Base Gas Price: ${formatUnits(baseGasPrice, "gwei")} gwei`);
-console.log(`   Priority Fee: ${formatUnits(tip, "gwei")} gwei`);
+// Gas price info moved to individual transaction creation functions
 console.log(`   ERC20 Balance to Recover: ${balance.toString()} tokens`);
 console.log("");
 
@@ -54,7 +50,12 @@ console.log("");
 
 if (simulate) {
     console.log("🔐 Signing bundle...");
-    const signedBundle = await signBundle([trx1, trx2, trx3]);
+    let signedBundle: any;
+    if (trx3.shouldInclude) {
+        signedBundle = await signBundle([trx1, trx2, trx3.transaction!]);
+    } else {
+        signedBundle = await signBundle([trx1, trx2]);
+    }
     
     console.log("🧪 Running bundle simulation...");
     await simulateBundle(signedBundle);
@@ -67,7 +68,12 @@ if (simulate) {
         console.log("");
 
         console.log("🔐 Signing bundle...");
-        const signedBundle = await signBundle([trx1, trx2, trx3]);
+        let signedBundle: any;
+        if (trx3.shouldInclude) {
+            signedBundle = await signBundle([trx1, trx2, trx3.transaction!]);
+        } else {
+            signedBundle = await signBundle([trx1, trx2]);
+        }
         
         console.log("🧪 Running bundle simulation...");
         const simulationResult = await simulateBundle(signedBundle);

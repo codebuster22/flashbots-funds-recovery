@@ -1,12 +1,14 @@
 import { parseUnits, formatEther, formatUnits } from "ethers";
 import { TransactionEntry } from "./types";
-import { compromisedAddress, ETH_AMOUNT_TO_FUND, funderAuthSigner, maxFeePerGas, maxPriorityFeePerGas, funderAddress, chainId } from "../config";
+import { compromisedAddress, ETH_AMOUNT_TO_FUND, funderAuthSigner, funderAddress, chainId } from "../config";
+import { getGasInfo } from "./gasController";
 
 export const createFundingTrx = (): TransactionEntry => {
     console.log("   💰 Creating funding transaction...");
     
+    const { maxFeePerGas, maxPriorityFeePerGas } = getGasInfo(); // 1.0x multiplier for Bundle1
     const ethAmountToSend = parseUnits(ETH_AMOUNT_TO_FUND, "ether");
-    const gasLimit = 50000n;
+    const gasLimit = 21000n;
     const estimatedGasCost = maxFeePerGas * gasLimit;
     
     console.log(`   📊 Transaction Details:`);

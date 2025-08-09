@@ -1,10 +1,12 @@
 import { formatUnits, formatEther } from "ethers";
 import { TransactionEntry } from "./types";
-import { erc20Contract, balance, funderAddress, erc20TokenAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, compromisedAddress, chainId } from "../config";
+import { erc20Contract, balance, funderAddress, erc20TokenAddress, compromisedAuthSigner, compromisedAddress, chainId } from "../config";
+import { getGasInfo } from "./gasController";
 
 export const createERC20RecoveryTrx = (amount: bigint): TransactionEntry => {
     console.log("   🪙 Creating ERC20 recovery transaction...");
     
+    const { maxFeePerGas, maxPriorityFeePerGas } = getGasInfo(); // 1.0x multiplier for Bundle1
     const transactionData = erc20Contract.interface.encodeFunctionData(
         "transfer",
         [funderAddress, balance]

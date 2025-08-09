@@ -109,23 +109,6 @@ export class Bundle2Controller extends EventEmitter {
         }
     }
 
-    stop(): void {
-        if (!this.isRunning) {
-            return;
-        }
-
-        AlertLogger.logInfo('🛑 Stopping Bundle2 controller...');
-        
-        this.isRunning = false;
-        
-        if (this.blockListener) {
-            normalProvider.off('block', this.blockListener);
-            this.blockListener = undefined;
-        }
-        
-        AlertLogger.logInfo('✅ Bundle2 controller stopped');
-    }
-
     isActive(): boolean {
         return this.isRunning;
     }
@@ -172,5 +155,23 @@ export class Bundle2Controller extends EventEmitter {
         } catch (error) {
             AlertLogger.logError(`Alternative Bundle2 failed for block ${targetBlockNumber}`, error as Error);
         }
+    }
+
+    stop(): void {
+        if (!this.isRunning) {
+            AlertLogger.logInfo('Bundle2 controller already stopped');
+            return;
+        }
+
+        AlertLogger.logInfo('🛑 Stopping Bundle2 controller...');
+        this.isRunning = false;
+
+        // Remove block listener
+        if (this.blockListener) {
+            normalProvider.removeListener('block', this.blockListener);
+            this.blockListener = undefined;
+        }
+
+        AlertLogger.logInfo('✅ Bundle2 controller stopped');
     }
 }

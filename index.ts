@@ -12,7 +12,10 @@ import {
     ETH_AMOUNT_TO_FUND,
     websocketRpc,
     baseGasPrice,
-    tip
+    tip,
+    upperBoundGasPrice,
+    upperBoundMaxFeePerGas,
+    upperBoundMaxPriorityFee
 } from "./config";
 
 import { ThreePhaseEventManager } from './src/monitoring/eventManager';
@@ -23,13 +26,14 @@ import { AlertLogger } from './src/monitoring/alertLogger';
 
 import { createFundingTrx } from "./src/createFundingTrx";
 import { createERC20RecoveryTrx } from "./src/createERC20RecoveryTrx";
-import { createWithdrawTrx } from "./src/createWithdrawTrx";
+import { createWithdrawTrx, WithdrawTrxResult } from "./src/createWithdrawTrx";
 import { signBundle } from "./src/signBundle";
 import { simulateBundle } from "./src/simulateBundle";
 import { sendBundleToFlashbotsAndMonitor } from "./src/sendBundleToFlashbotsAndMonitor";
 import { sendBundleToBeaver } from "./src/sendBundleToBeaver";
 import { normalProvider } from "./config";
-import { formatEther, formatUnits } from "ethers";
+import { formatEther, formatUnits, FeeData } from "ethers";
+import { updateGasConfig } from "./src/gasController";
 
 class MasterOrchestrator {
     private eventManager: ThreePhaseEventManager;
@@ -40,7 +44,12 @@ class MasterOrchestrator {
     
     // Bundle1 tracking
     private bundle1Active: boolean = false;
+    private bundle1Aggressive: boolean = false;
     private bundle1BlockListener?: (blockNumber: number) => Promise<void>;
+    
+    // Aggressive mode tracking
+    private aggressiveModeStartBlock: number = 0;
+    private lastProcessedBlock: number = 0;
 
     constructor() {
         // Ensure required addresses are provided for three-phase system
@@ -79,6 +88,18 @@ class MasterOrchestrator {
             AlertLogger.logInfo(`Proxy: ${event.proxyAddress}`);
             
             this.startBundle2Strategy(event.rawSignedTransactionHexString);
+        });
+
+        // Bundle2 stop signal
+        this.eventManager.on('stop-bundle2', () => {
+            AlertLogger.logInfo('🛑 Received stop-bundle2 signal');
+            this.bundle2Controller.stop();
+        });
+
+        // Aggressive Bundle1 activation signal
+        this.eventManager.on('activate-aggressive-bundle1', async () => {
+            AlertLogger.logInfo('⚡ Activating aggressive Bundle1 mode');
+            await this.startAggressiveBundle1();
         });
 
         // Hacker activity → Emergency replacement
@@ -219,6 +240,10 @@ class MasterOrchestrator {
 
         this.bundle1BlockListener = async (blockNumber: number) => {
             if (!this.bundle1Active || this.recoverySucceeded) return;
+
+            const feeData = await normalProvider.getFeeData();
+
+            updateGasConfig(feeData)
             
             try {
                 await this.submitBundle1(blockNumber);
@@ -259,11 +284,140 @@ class MasterOrchestrator {
     }
 
     private async createBundle1(): Promise<any[]> {
+        if (this.bundle1Aggressive) {
+            return await this.createAggressiveBundle1();
+        }
+        
         const fundingTx = createFundingTrx();
         const recoveryTx = createERC20RecoveryTrx(balance);
-        const withdrawTx = await createWithdrawTrx();
+        const withdrawResult = await createWithdrawTrx();
         
-        return [fundingTx, recoveryTx, withdrawTx];
+        const bundle = [fundingTx, recoveryTx];
+        if (withdrawResult.shouldInclude) {
+            bundle.push(withdrawResult.transaction!);
+            AlertLogger.logInfo(`✅ Bundle1 created with 3 transactions (including withdrawal)`);
+        } else {
+            AlertLogger.logInfo(`⚠️ Bundle1 created with 2 transactions (withdrawal excluded: ${withdrawResult.reason})`);
+        }
+        
+        return bundle;
+    }
+
+    private async createAggressiveBundle1(): Promise<any[]> {
+        // Get current block to calculate dynamic multiplier
+        const currentBlock = await normalProvider.getBlockNumber();
+        const multiplier = this.calculateDynamicMultiplier(currentBlock);
+        
+        // Log escalation info only when multiplier changes
+        const blocksSinceStart = currentBlock - this.aggressiveModeStartBlock;
+        if (currentBlock !== this.lastProcessedBlock && blocksSinceStart % 2 === 0 && blocksSinceStart > 0) {
+            AlertLogger.logInfo(`🚀 Gas escalation: Block ${currentBlock} (+${blocksSinceStart}) → ${multiplier}x multiplier`);
+        }
+        this.lastProcessedBlock = currentBlock;
+        
+        AlertLogger.logInfo(`⚡ Creating AGGRESSIVE Bundle1 with ${multiplier}x gas multiplier (block ${currentBlock})`);
+        
+        // Use aggressive gas pricing by temporarily updating gas config
+        const originalFeeData = await normalProvider.getFeeData();
+        
+        // Calculate boosted values with upper bound protection
+        let aggressiveMaxFee: bigint | null = null;
+        let aggressivePriorityFee: bigint | null = null;
+        let aggressiveGasPrice: bigint | null = null;
+        
+        if (originalFeeData.maxFeePerGas) {
+            const boostedMaxFee = originalFeeData.maxFeePerGas * BigInt(multiplier);
+            aggressiveMaxFee = this.applyUpperBounds(boostedMaxFee, upperBoundMaxFeePerGas);
+        }
+        
+        if (originalFeeData.maxPriorityFeePerGas) {
+            const boostedPriorityFee = originalFeeData.maxPriorityFeePerGas * BigInt(multiplier);
+            aggressivePriorityFee = this.applyUpperBounds(boostedPriorityFee, upperBoundMaxPriorityFee);
+        }
+        
+        if (originalFeeData.gasPrice) {
+            const boostedGasPrice = originalFeeData.gasPrice * BigInt(multiplier);
+            aggressiveGasPrice = this.applyUpperBounds(boostedGasPrice, upperBoundGasPrice);
+        }
+        
+        // Log if upper bounds were applied
+        if (originalFeeData.maxFeePerGas && aggressiveMaxFee === upperBoundMaxFeePerGas) {
+            AlertLogger.logInfo(`🔒 Max fee capped at upper bound: ${formatUnits(upperBoundMaxFeePerGas, "gwei")} gwei`);
+        }
+        if (originalFeeData.maxPriorityFeePerGas && aggressivePriorityFee === upperBoundMaxPriorityFee) {
+            AlertLogger.logInfo(`🔒 Priority fee capped at upper bound: ${formatUnits(upperBoundMaxPriorityFee, "gwei")} gwei`);
+        }
+        if (originalFeeData.gasPrice && aggressiveGasPrice === upperBoundGasPrice) {
+            AlertLogger.logInfo(`🔒 Gas price capped at upper bound: ${formatUnits(upperBoundGasPrice, "gwei")} gwei`);
+        }
+        
+        // Create a boosted fee data for aggressive mode
+        const aggressiveFeeData = {
+            maxFeePerGas: aggressiveMaxFee,
+            maxPriorityFeePerGas: aggressivePriorityFee,
+            gasPrice: aggressiveGasPrice,
+            toJSON: originalFeeData.toJSON // Required by FeeData interface
+        };
+        
+        // Temporarily update gas config for aggressive pricing
+        updateGasConfig(aggressiveFeeData);
+        
+        try {
+            const fundingTx = createFundingTrx();
+            const recoveryTx = createERC20RecoveryTrx(balance);
+            const withdrawResult = await createWithdrawTrx();
+            
+            const bundle = [fundingTx, recoveryTx];
+            if (withdrawResult.shouldInclude) {
+                bundle.push(withdrawResult.transaction!);
+                AlertLogger.logInfo(`⚡ Aggressive Bundle1 created with 3 transactions (including withdrawal)`);
+            } else {
+                AlertLogger.logInfo(`⚠️ Aggressive Bundle1 created with 2 transactions (withdrawal excluded: ${withdrawResult.reason})`);
+            }
+            
+            return bundle;
+        } finally {
+            // Restore original gas config
+            updateGasConfig(originalFeeData);
+        }
+    }
+
+    private calculateDynamicMultiplier(currentBlock: number): number {
+        if (!this.bundle1Aggressive || this.aggressiveModeStartBlock === 0) {
+            return 1; // Normal mode
+        }
+        
+        const blocksSinceStart = currentBlock - this.aggressiveModeStartBlock;
+        
+        // Start with 3x multiplier, increase by 1x every 2 blocks
+        // Block 0-1: 3x, Block 2-3: 4x, Block 4-5: 5x, etc.
+        const additionalMultiplier = Math.floor(blocksSinceStart / 2);
+        const dynamicMultiplier = 3 + additionalMultiplier;
+        
+        return dynamicMultiplier;
+    }
+
+    private applyUpperBounds(gas: bigint, upperBound: bigint): bigint {
+        return gas > upperBound ? upperBound : gas;
+    }
+
+    private async startAggressiveBundle1(): Promise<void> {
+        if (this.bundle1Aggressive) {
+            AlertLogger.logDebug('Aggressive Bundle1 already active - ignoring duplicate activation');
+            return;
+        }
+        
+        AlertLogger.logInfo('🔥 SWITCHING TO AGGRESSIVE BUNDLE1 MODE');
+        AlertLogger.logInfo('   Starting with 3x gas multiplier, escalating +1x every 2 blocks');
+        
+        // Track the starting block for escalation calculations
+        const currentBlock = await normalProvider.getBlockNumber();
+        this.aggressiveModeStartBlock = currentBlock;
+        this.lastProcessedBlock = currentBlock;
+        this.bundle1Aggressive = true;
+        
+        AlertLogger.logInfo(`   Aggressive mode started at block ${currentBlock}`);
+        AlertLogger.logInfo(`   Upper bounds: Max Fee ${formatUnits(upperBoundMaxFeePerGas, "gwei")} gwei, Priority ${formatUnits(upperBoundMaxPriorityFee, "gwei")} gwei, Gas Price ${formatUnits(upperBoundGasPrice, "gwei")} gwei`);
     }
 
     private async startBundle2Strategy(upgradeRawSignedHex: string): Promise<void> {

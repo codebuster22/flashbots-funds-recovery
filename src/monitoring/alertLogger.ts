@@ -39,4 +39,11 @@ export class AlertLogger {
             console.error(error);
         }
     }
+
+    static logDebug(message: string): void {
+        // Only log debug messages if LOG_LEVEL is DEBUG
+        if (process.env.LOG_LEVEL === 'DEBUG') {
+            console.log(`[${new Date().toISOString()}] DEBUG: ${message}`);
+        }
+    }
 }

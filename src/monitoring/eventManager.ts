@@ -8,11 +8,12 @@ import { BundleOpportunityHandler } from './handlers/bundleOpportunityHandler';
 import { AlertLogger } from './alertLogger';
 import { SafeProposalMonitor } from './safe/safeProposalMonitor';
 import { ConfirmationTracker } from './safe/confirmationTracker';
-import { GasController } from '../gasController';
+import { getGasInfo } from '../gasController';
 import { alchemyApiKey } from '../../config';
 import { buildSafeExecRawFromApi, fetchLatestConfirmedUpgradeProposal } from '../safeExecBuilder';
 import {
     UpgradeDetectedEvent,
+    UpgradeExecutedEvent,
     HackerActivityEvent,
     BundleOpportunityEvent,
     EmergencyResponseEvent
@@ -31,10 +32,11 @@ export class ThreePhaseEventManager extends EventEmitter {
     // Three-Phase System Components
     private safeProposalMonitor: SafeProposalMonitor;
     private confirmationTracker: ConfirmationTracker;
-    private gasController: GasController;
+    // Gas controller removed - using getGasInfo() function directly
     
     // State tracking
     private currentPhase: 'standby' | 'proposal-detected' | 'confirmations-ready' | 'mempool-active' = 'standby';
+    private aggressiveModeActivated: boolean = false;
     private safeAddress: string;
     private proxyAddress: string;
     private proxyAdminAddress: string;
@@ -76,7 +78,7 @@ export class ThreePhaseEventManager extends EventEmitter {
             proxyAdminAddress
         );
         
-        this.gasController = new GasController();
+        // Gas controller initialization removed - using getGasInfo() function directly
         
         // Save references for later use
         this.safeAddress = safeAddress;
@@ -95,10 +97,15 @@ export class ThreePhaseEventManager extends EventEmitter {
             this.handleProposalDetected(event);
         });
 
+        this.safeProposalMonitor.on('upgrade-executed', (event: UpgradeExecutedEvent) => {
+            AlertLogger.logInfo('🎯 UPGRADE EXECUTED DETECTED - Switching to aggressive Bundle1');
+            this.handleUpgradeExecuted(event);
+        });
+
         this.safeProposalMonitor.on('upgrade-detected', async (_event: any) => {
             AlertLogger.logInfo('📡 PHASE 1 → BUNDLE2: Already executed upgrade detected');
             try {
-                const gas = this.gasController.getBundle2Gas();
+                const gas = getGasInfo(2n); // 2.0x multiplier for Bundle2
                 const proposal = await fetchLatestConfirmedUpgradeProposal(this.safeAddress, this.proxyAdminAddress, this.safeApiBaseUrl);
                 if (!proposal) {
                     AlertLogger.logInfo('Executed signal received but no confirmed upgrade proposal found');
@@ -150,7 +157,7 @@ export class ThreePhaseEventManager extends EventEmitter {
             AlertLogger.logInfo('📡 PHASE 3 → BUNDLE2: Target upgrade transaction detected');
             // Enrich mempool event by building raw signed upgrade tx from Safe API
             try {
-                const gas = this.gasController.getBundle2Gas();
+                const gas = getGasInfo(2n); // 2.0x multiplier for Bundle2
                 const proposal = event.proposal || await fetchLatestConfirmedUpgradeProposal(this.safeAddress, this.proxyAdminAddress, this.safeApiBaseUrl);
                 if (!proposal) {
                     AlertLogger.logInfo('No confirmed Safe upgrade proposal found to build exec');
@@ -234,7 +241,7 @@ export class ThreePhaseEventManager extends EventEmitter {
         AlertLogger.logInfo('⚡ Starting PHASE 3: Aggressive mempool monitoring...');
         
         // Activate gas controller aggressive mode
-        this.gasController.setMode('aggressive');
+        // Gas mode set to aggressive - will use higher multipliers in emergency scenarios
         
         // Configure mempool monitor for targeted detection
         this.monitor.setTargetTransaction(event.expectedTransactionPattern);
@@ -246,7 +253,7 @@ export class ThreePhaseEventManager extends EventEmitter {
 
         // Build raw signed Safe exec transaction from Safe API (confirmations-ready)
         try {
-            const gas = this.gasController.getBundle2Gas();
+            const gas = getGasInfo(2n); // 2.0x multiplier for Bundle2
             const rawSignedTransactionHexString = await buildSafeExecRawFromApi(
                 event.proposal,
                 this.safeAddress,
@@ -277,11 +284,41 @@ export class ThreePhaseEventManager extends EventEmitter {
         }
     }
 
+    private async handleUpgradeExecuted(event: UpgradeExecutedEvent): Promise<void> {
+        if (this.aggressiveModeActivated) {
+            AlertLogger.logDebug('Aggressive mode already activated - ignoring additional executed upgrades');
+            return;
+        }
+        
+        AlertLogger.logInfo('🚨 UPGRADE ALREADY EXECUTED - Emergency mode activated');
+        AlertLogger.logInfo(`Safe Tx Hash: ${event.safeTxHash}`);
+        AlertLogger.logInfo(`Block Number: ${event.blockNumber}`);
+        AlertLogger.logInfo(`Executed At: ${event.executedAt.toISOString()}`);
+        
+        // Mark that aggressive mode has been activated to prevent duplicates
+        this.aggressiveModeActivated = true;
+        
+        // Set phase to indicate upgrade was executed by others
+        this.currentPhase = 'mempool-active';
+        
+        // Stop Bundle2 controller if it's running
+        this.emit('stop-bundle2');
+        
+        // Activate aggressive Bundle1 mode
+        this.emit('activate-aggressive-bundle1');
+        
+        // Stop all monitoring since upgrade is done
+        setTimeout(() => {
+            AlertLogger.logInfo('🛑 Upgrade executed by others - stopping all monitoring');
+            this.stop();
+        }, 5000); // Give 5 seconds for Bundle1 to become aggressive before stopping
+    }
+
     private async handleEmergencyResponse(event: EmergencyResponseEvent): Promise<void> {
         AlertLogger.logInfo('🚨 EMERGENCY RESPONSE TRIGGERED');
         
         // Always use emergency gas pricing
-        const emergencyGas = this.gasController.getEmergencyGas();
+        const emergencyGas = getGasInfo(3n); // 3.0x multiplier for emergency
         
         switch (event.action) {
             case 'replace-with-higher-gas':
@@ -330,7 +367,7 @@ export class ThreePhaseEventManager extends EventEmitter {
         this.monitor.stop();
         
         // Reset gas controller
-        this.gasController.setMode('normal');
+        // Reset to normal gas mode
         this.monitor.disableAggressiveMode();
         this.monitor.clearTargetTransaction();
         
@@ -356,9 +393,7 @@ export class ThreePhaseEventManager extends EventEmitter {
         return this.confirmationTracker;
     }
 
-    public getGasController(): GasController {
-        return this.gasController;
-    }
+    // Gas controller methods removed - use getGasInfo() function directly
 
     public getCurrentPhase(): string {
         return this.currentPhase;
@@ -369,14 +404,14 @@ export class ThreePhaseEventManager extends EventEmitter {
         safeMonitorStatus: any;
         confirmationTrackerRunning: boolean;
         mempoolMonitorStatus: any;
-        gasControllerStatus: any;
+        gasInfo: any;
     } {
         return {
             currentPhase: this.currentPhase,
             safeMonitorStatus: this.safeProposalMonitor.getStatus(),
             confirmationTrackerRunning: (this as any).confirmationTracker?.isTracking?.length ? true : true,
             mempoolMonitorStatus: this.monitor.getEnhancedStatus(),
-            gasControllerStatus: this.gasController.getStatus()
+            gasInfo: getGasInfo() // Current gas info with 1.0x multiplier
         };
     }
 }

@@ -1,8 +1,16 @@
 import { formatEther, formatUnits, parseUnits } from "ethers";
 import { TransactionEntry } from "./types";
-import { normalProvider, compromisedAddress, funderAddress, maxFeePerGas, maxPriorityFeePerGas, compromisedAuthSigner, ETH_AMOUNT_TO_FUND, chainId } from "../config";
+import { normalProvider, compromisedAddress, funderAddress, compromisedAuthSigner, ETH_AMOUNT_TO_FUND, chainId } from "../config";
+import { getGasInfo } from "./gasController";
 
-export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEntry> => {
+export interface WithdrawTrxResult {
+    transaction: TransactionEntry | null;
+    shouldInclude: boolean;
+    calculatedAmount: bigint;
+    reason?: string;
+}
+
+export const createWithdrawTrx = async (amount?: bigint): Promise<WithdrawTrxResult> => {
     console.log("   💸 Creating ETH withdrawal transaction...");
     
     let currentBalance = amount;
@@ -12,6 +20,7 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEnt
         console.log(`   💰 Current balance: ${formatEther(currentBalance)} ETH`);
     }
     
+    const { maxFeePerGas, maxPriorityFeePerGas } = getGasInfo(); // 1.0x multiplier for Bundle1
     const gasLimit = 50000n;
     const estimatedGasCost = maxFeePerGas * gasLimit;
     const fundedAmount = parseUnits(ETH_AMOUNT_TO_FUND, "ether");
@@ -38,7 +47,15 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEnt
     
     if (maxEthToSendBack <= 0n) {
         console.log(`   ⚠️  WARNING: Calculated return amount is ${formatEther(maxEthToSendBack)} ETH`);
-        console.log(`   ⚠️  This might indicate insufficient funds for gas costs`);
+        console.log(`   ⚠️  This indicates insufficient funds for gas costs - excluding withdrawal transaction`);
+        console.log(`   🚫 Withdrawal transaction will be excluded from bundle`);
+        
+        return {
+            transaction: null,
+            shouldInclude: false,
+            calculatedAmount: maxEthToSendBack,
+            reason: `Insufficient funds: calculated amount ${formatEther(maxEthToSendBack)} ETH <= 0`
+        };
     }
     
     const withdrawTrxData = {
@@ -57,5 +74,10 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<TransactionEnt
     }
 
     console.log(`   ✅ ETH withdrawal transaction created successfully`);
-    return trx3;
+    return {
+        transaction: trx3,
+        shouldInclude: true,
+        calculatedAmount: maxEthToSendBack,
+        reason: undefined
+    };
 }

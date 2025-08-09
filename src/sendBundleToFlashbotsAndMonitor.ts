@@ -48,8 +48,8 @@ export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string
             console.log(`🎉 SUCCESS: Bundle (${signedBundle.length} trx) included in block ${targetBlockNumber}!`);
         } else if (waitResponse === FlashbotsBundleResolution.BlockPassedWithoutInclusion) {
             console.log(`⚠️  Bundle (${signedBundle.length} trx) not included in block ${targetBlockNumber} - block passed`);
-        } else if (waitResponse === FlashbotsBundleResolution.AccountNonceTooHigh) {
-            console.log(`❌ Bundle (${signedBundle.length} trx) failed: Account nonce too high`);
+            const stats = await flashbotsProvider.getBundleStats(bundleReceipt.bundleHash, targetBlockNumber);
+            console.log(`   Stats: ${JSON.stringify(stats, null, 2)}`);
         } else {
             console.log(`❓ Unexpected bundle resolution (${signedBundle.length} trx): ${waitResponse}`);
         }

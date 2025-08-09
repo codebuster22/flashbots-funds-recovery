@@ -26,6 +26,9 @@ const envSchema = z.object({
     USE_FLASHBOTS: z.string().optional().default("true"),
     BEAVER_RPC_URL: z.string().optional().default("https://rpc.beaverbuild.org/"),
     ALCHEMY_API_KEY: z.string().optional(),
+    UPPER_BOUND_GAS_PRICE: z.string().default("100"),
+    UPPER_BOUND_MAX_FEE_PER_GAS: z.string().default("100"),
+    UPPER_BOUND_MAX_PRIORITY_FEE: z.string().default("50"),
 });
 
 const env = envSchema.parse(process.env);
@@ -36,6 +39,9 @@ const chainId = Number.parseInt(env.CHAIN_ID, 10);
 const ETH_AMOUNT_TO_FUND = env.ETH_AMOUNT_TO_FUND;
 const baseGasPrice = parseUnits(env.BASE_GAS_PRICE, "gwei");
 const tip = parseUnits(env.TIP_IN_GWEI, "gwei");
+const upperBoundGasPrice = parseUnits(env.UPPER_BOUND_GAS_PRICE, "gwei");
+const upperBoundMaxFeePerGas = parseUnits(env.UPPER_BOUND_MAX_FEE_PER_GAS, "gwei");
+const upperBoundMaxPriorityFee = parseUnits(env.UPPER_BOUND_MAX_PRIORITY_FEE, "gwei");
 const flashbotsRpc = env.FLASHBOTS_RPC;
 const funderKey = env.FUNDER_PRIVATE_KEY;
 const compromisedKey = env.COMPROMISED_PRIVATE_KEY;
@@ -70,14 +76,12 @@ const flashbotsProvider = await FlashbotsBundleProvider.create(
     flashbotsRpc
 );
 
-const maxFeePerGas = baseGasPrice * 3n + tip;
-const maxPriorityFeePerGas = tip;
+// Gas calculations moved to gasController.ts
 
 export {
     simulate,
     chainId,
-    maxPriorityFeePerGas,
-    maxFeePerGas,
+    // Gas exports removed - use getGasInfo() from gasController
     beaverRpcUrl,
     alchemyApiKey,
     useFlashBots,
@@ -97,5 +101,8 @@ export {
     ETH_AMOUNT_TO_FUND,
     baseGasPrice,
     tip,
+    upperBoundGasPrice,
+    upperBoundMaxFeePerGas,
+    upperBoundMaxPriorityFee,
     websocketRpc
 }

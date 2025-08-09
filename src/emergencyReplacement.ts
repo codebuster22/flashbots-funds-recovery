@@ -6,10 +6,9 @@ import {
     funderAddress,
     balance,
     normalProvider,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
     chainId
 } from '../config';
+import { getGasInfo } from './gasController';
 import { AlertLogger } from './monitoring/alertLogger';
 import { SuspiciousTransaction } from './monitoring/types';
 
@@ -115,8 +114,9 @@ export class EmergencyReplacement {
         const baseFee = (await normalProvider.getBlock('latest'))?.baseFeePerGas ?? 0n;
 
         // Support both legacy and 1559 hacker transactions
+        const defaultGas = getGasInfo(3n); // Use 3.0x for emergency calculations
         const inferredHackerTip = hackerTx.maxPriorityFeePerGas ?? (hackerTx.gasPrice ?? 0n);
-        const hackerTip = inferredHackerTip || maxPriorityFeePerGas;
+        const hackerTip = inferredHackerTip || defaultGas.maxPriorityFeePerGas;
         const inferredHackerMaxFee = hackerTx.maxFeePerGas ?? (hackerTx.gasPrice ? baseFee + hackerTx.gasPrice : undefined);
         const hackerMaxFee = inferredHackerMaxFee ?? (baseFee + hackerTip);
 
@@ -152,7 +152,8 @@ export class EmergencyReplacement {
         const defaultLimit = methodHint.includes('approve') ? BigInt('80000') : methodHint.includes('transfer') ? BigInt('70000') : BigInt('120000');
         const hackerGasLimit = hackerTx.gasLimit ?? defaultLimit;
         const ourGasLimit = BigInt('21000'); // simple transfer
-        const hackerTip = (hackerTx.maxPriorityFeePerGas ?? (hackerTx.gasPrice ?? 0n)) || maxPriorityFeePerGas;
+        const defaultGas = getGasInfo(3n); // Use 3.0x for emergency calculations
+        const hackerTip = (hackerTx.maxPriorityFeePerGas ?? (hackerTx.gasPrice ?? 0n)) || defaultGas.maxPriorityFeePerGas;
 
         const hackerPriorityTotal = hackerTip * hackerGasLimit;
         const requiredTip = hackerPriorityTotal / ourGasLimit + parseUnits('1', 'gwei');

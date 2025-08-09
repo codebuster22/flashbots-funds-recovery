@@ -38,6 +38,15 @@ export interface UpgradeDetectedEvent extends BaseMonitoringEvent {
     upgradeMethod: string;
 }
 
+export interface UpgradeExecutedEvent extends BaseMonitoringEvent {
+    type: 'upgrade-executed';
+    source: 'safe-api';
+    safeTxHash: string;
+    blockNumber: number;
+    isSuccessful: boolean;
+    executedAt: Date;
+}
+
 export interface HackerActivityEvent extends BaseMonitoringEvent {
     type: 'hacker-erc20-activity';
     transaction: SuspiciousTransaction;

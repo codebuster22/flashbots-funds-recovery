@@ -7,6 +7,7 @@ import {
     ProposalDetectedEvent,
     SafeDataDecoded 
 } from './safeApiTypes';
+import { UpgradeExecutedEvent } from '../types';
 
 export class SafeProposalMonitor extends EventEmitter {
     private safeAddress: string;
@@ -16,6 +17,7 @@ export class SafeProposalMonitor extends EventEmitter {
     private isRunning: boolean = false;
     private pollingTimer?: NodeJS.Timeout;
     private seenProposals: Set<string> = new Set(); // Track safeTxHash
+    private processedExecutedUpgrades: Set<string> = new Set(); // Track processed executed upgrades
 
     // Method signatures for ProxyAdmin upgrade functions
     private static readonly UPGRADE_METHOD_SIGNATURES = new Set([
@@ -104,13 +106,26 @@ export class SafeProposalMonitor extends EventEmitter {
 
             // Filter for upgrade proposals targeting our ProxyAdmin
             const upgradeTransactions = response.data.results.filter(tx => 
-                this.isUpgradeTransaction(tx) && !this.seenProposals.has(tx.safeTxHash)
+                this.isUpgradeTransaction(tx)
             );
 
-            // Process new upgrade transactions
-            for (const transaction of upgradeTransactions) {
+            // Process new upgrade transactions (not seen before)
+            const newUpgradeTransactions = upgradeTransactions.filter(tx => 
+                !this.seenProposals.has(tx.safeTxHash)
+            );
+
+            for (const transaction of newUpgradeTransactions) {
                 this.seenProposals.add(transaction.safeTxHash);
                 await this.handleUpgradeProposal(transaction);
+            }
+
+            // Check for executed upgrade transactions
+            const executedUpgradeTransactions = upgradeTransactions.filter(tx => 
+                tx.isExecuted && tx.isSuccessful && tx.blockNumber
+            );
+
+            for (const transaction of executedUpgradeTransactions) {
+                await this.handleExecutedUpgrade(transaction);
             }
 
         } catch (error) {
@@ -176,27 +191,39 @@ export class SafeProposalMonitor extends EventEmitter {
         }
     }
 
-    private handleExecutedUpgrade(transaction: SafeTransaction): void {
-        if (!transaction.transactionHash) {
-            AlertLogger.logError('Executed transaction missing transactionHash');
+    private async handleExecutedUpgrade(transaction: SafeTransaction): Promise<void> {
+        if (!transaction.transactionHash || !transaction.blockNumber) {
+            AlertLogger.logError('Executed transaction missing transactionHash or blockNumber');
             return;
         }
 
-        AlertLogger.logInfo('🎯 Found already executed upgrade transaction');
+        // Check if we've already processed this executed upgrade
+        if (this.processedExecutedUpgrades.has(transaction.safeTxHash)) {
+            AlertLogger.logDebug(`Executed upgrade ${transaction.safeTxHash} already processed - skipping`);
+            return;
+        }
+
+        // Mark as processed
+        this.processedExecutedUpgrades.add(transaction.safeTxHash);
+
+        AlertLogger.logInfo('🎯 UPGRADE ALREADY EXECUTED - Switching to aggressive Bundle1 mode');
+        AlertLogger.logInfo(`Safe Tx Hash: ${transaction.safeTxHash}`);
         AlertLogger.logInfo(`Transaction Hash: ${transaction.transactionHash}`);
         AlertLogger.logInfo(`Block Number: ${transaction.blockNumber}`);
+        AlertLogger.logInfo(`Execution Date: ${transaction.executionDate}`);
 
-        // Emit upgrade-detected event for immediate Bundle2
-        this.emit('upgrade-detected', {
-            type: 'upgrade-detected',
-            transaction: transaction,
-            rawTransactionHash: transaction.transactionHash,
-            proxyAddress: this.proxyAdminAddress,
-            adminAddress: transaction.executor,
-            upgradeMethod: transaction.dataDecoded?.method || 'upgrade',
-            timestamp: new Date(),
-            blockNumber: transaction.blockNumber
-        });
+        // Emit upgrade-executed event to stop Bundle2 and activate aggressive Bundle1
+        const upgradeExecutedEvent: UpgradeExecutedEvent = {
+            type: 'upgrade-executed',
+            source: 'safe-api',
+            safeTxHash: transaction.safeTxHash,
+            blockNumber: transaction.blockNumber,
+            isSuccessful: transaction.isSuccessful ?? false,
+            executedAt: transaction.executionDate ? new Date(transaction.executionDate) : new Date(),
+            timestamp: new Date()
+        };
+
+        this.emit('upgrade-executed', upgradeExecutedEvent);
     }
 
     // Get current status
