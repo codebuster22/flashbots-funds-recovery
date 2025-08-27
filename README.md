@@ -28,9 +28,17 @@ npm install
 
 Create a `.env` file in the project root with the following variables:
 
+### Quick Setup
+```bash
+# Copy the example file and edit with your values
+cp env.example .env
+# Then edit .env with your actual configuration
+```
+
 ```env
 # Required: RPC Configuration
 NORMAL_RPC=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
+WEBSOCKET_RPC=wss://mainnet.infura.io/ws/v3/YOUR_PROJECT_ID  # Optional: WebSocket RPC
 
 # Required: Wallet Private Keys (without 0x prefix)
 FUNDER_PRIVATE_KEY=your_funder_wallet_private_key_here
@@ -39,11 +47,39 @@ COMPROMISED_PRIVATE_KEY=your_compromised_wallet_private_key_here
 # Required: Token Configuration
 ERC20_TOKEN_ADDRESS=0xdAC17F958D2ee523a2206206994597C13D831ec7  # USDT example
 
+# Required: Account Activation (get signature from WLFI official website unlock page)
+ACTIVATE_ACCOUNT_SIGNATURE=your_account_activation_signature_here
+
+# Required: Three-phase system configuration
+PROXY_ADMIN_ADDRESS=0x...                   # Proxy admin address for upgradeable contracts
+SAFE_ADDRESS=0x...                          # Safe multisig address
+
+# Optional: Advanced Configuration
+CHAIN_ID=1                                  # Ethereum mainnet (default: 1)
+PROXY_CONTRACT_ADDRESS=0x...                # Optional: Proxy contract address (defaults to ERC20_TOKEN_ADDRESS)
+LOCKBOX_VESTING_CONTRACT_ADDRESS=0x38F7e36eC57263e470a3c5761f3Ff4b94b0FDB2E  # Lockbox vesting contract
+
 # Optional: Execution Configuration
 ETH_AMOUNT_TO_FUND=0.001                    # ETH to send for gas (default: 0.001)
-BASE_GAS_PRICE=10                           # Base gas price in gwei (default: 10)
-TIP_IN_GWEI=2                              # Priority fee for validators in gwei (default: 0)
-SIMULATE=true                               # Set to false for real execution (default: true)
+BASE_GAS_PRICE=4                            # Base gas price in gwei (default: 4)
+TIP_IN_GWEI=4                              # Priority fee for validators in gwei (default: 4)
+SIMULATE=false                              # Set to false for real execution (default: false)
+USE_FLASHBOTS=true                          # Use Flashbots for bundle submission (default: true)
+
+# Optional: Gas Price Limits
+UPPER_BOUND_GAS_PRICE=100                   # Maximum gas price in gwei (default: 100)
+UPPER_BOUND_MAX_FEE_PER_GAS=100            # Maximum fee per gas in gwei (default: 100)
+UPPER_BOUND_MAX_PRIORITY_FEE=50            # Maximum priority fee in gwei (default: 50)
+
+# Optional: API Configuration
+FLASHBOTS_RPC=https://relay.flashbots.net   # Custom Flashbots RPC endpoint
+BEAVER_RPC_URL=https://rpc.beaverbuild.org/ # Beaver builder RPC URL
+ALCHEMY_API_KEY=your_alchemy_api_key        # Alchemy API key for enhanced features
+SAFE_API_BASE_URL=https://safe-transaction-mainnet.safe.global  # Safe API base URL
+
+# Optional: Monitoring & Alerting
+WEBHOOK_URL=https://your-webhook-url.com    # Webhook for notifications
+CONSECUTIVE_SKIP_THRESHOLD=5                # Number of consecutive skips before alert (default: 5)
 ```
 
 ### Environment Variables Explained
@@ -54,10 +90,40 @@ SIMULATE=true                               # Set to false for real execution (d
 | `FUNDER_PRIVATE_KEY` | Private key of wallet with ETH for gas | `abcd1234...` | ✅ |
 | `COMPROMISED_PRIVATE_KEY` | Private key of compromised wallet | `efgh5678...` | ✅ |
 | `ERC20_TOKEN_ADDRESS` | Contract address of token to recover | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | ✅ |
+| `ACTIVATE_ACCOUNT_SIGNATURE` | Account activation signature (get from WLFI unlock page) | `0x1234...` | ✅ |
+| `PROXY_ADMIN_ADDRESS` | Proxy admin address for upgradeable contracts | `0xabc123...` | ✅ |
+| `SAFE_ADDRESS` | Safe multisig address for three-phase system | `0xdef456...` | ✅ |
+| `WEBSOCKET_RPC` | WebSocket RPC endpoint (optional) | `wss://mainnet.infura.io/ws/v3/...` | ❌ |
+| `CHAIN_ID` | Ethereum chain ID | `1` | ❌ |
+| `PROXY_CONTRACT_ADDRESS` | Proxy contract address (defaults to ERC20_TOKEN_ADDRESS) | `0x789abc...` | ❌ |
+| `LOCKBOX_VESTING_CONTRACT_ADDRESS` | Lockbox vesting contract address | `0x38F7e36...` | ❌ |
 | `ETH_AMOUNT_TO_FUND` | ETH amount to fund for gas fees | `0.001` | ❌ |
 | `BASE_GAS_PRICE` | Base gas price in gwei | `4` | ❌ |
 | `TIP_IN_GWEI` | Priority fee for Flashbots validators | `4` | ❌ |
-| `SIMULATE` | Run simulation only (true/false) | `true` | ❌ |
+| `SIMULATE` | Run simulation only (true/false) | `false` | ❌ |
+| `USE_FLASHBOTS` | Use Flashbots for bundle submission | `true` | ❌ |
+| `UPPER_BOUND_GAS_PRICE` | Maximum gas price in gwei | `100` | ❌ |
+| `UPPER_BOUND_MAX_FEE_PER_GAS` | Maximum fee per gas in gwei | `100` | ❌ |
+| `UPPER_BOUND_MAX_PRIORITY_FEE` | Maximum priority fee in gwei | `50` | ❌ |
+| `FLASHBOTS_RPC` | Custom Flashbots RPC endpoint | `https://relay.flashbots.net` | ❌ |
+| `BEAVER_RPC_URL` | Beaver builder RPC URL | `https://rpc.beaverbuild.org/` | ❌ |
+| `ALCHEMY_API_KEY` | Alchemy API key for enhanced features | `your_api_key` | ❌ |
+| `SAFE_API_BASE_URL` | Safe API base URL | `https://safe-transaction-mainnet.safe.global` | ❌ |
+| `WEBHOOK_URL` | Webhook URL for notifications | `https://your-webhook-url.com` | ❌ |
+| `CONSECUTIVE_SKIP_THRESHOLD` | Consecutive skips before alert | `5` | ❌ |
+
+### 🔐 Account Activation Signature
+
+The `ACTIVATE_ACCOUNT_SIGNATURE` is required for WLFI token operations. To obtain this signature:
+
+1. Visit the **WLFI official website**
+2. Navigate to the **unlock page** 
+3. Connect your compromised wallet
+4. Complete the account activation process
+5. Copy the generated signature
+6. Add it to your `.env` file as `ACTIVATE_ACCOUNT_SIGNATURE`
+
+**Important**: This signature is wallet-specific and must be obtained for the exact compromised wallet address you're recovering from.
 
 ## 🎯 How to Run
 
