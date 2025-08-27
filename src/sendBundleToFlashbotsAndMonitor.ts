@@ -60,8 +60,10 @@ export const sendBundleToFlashbotsAndMonitor = async (signedBundle: Array<string
             }
         } else if (waitResponse === FlashbotsBundleResolution.BlockPassedWithoutInclusion) {
             console.log(`⚠️  Bundle (${signedBundle.length} trx) not included in block ${targetBlockNumber} - block passed`);
-            const stats = await flashbotsProvider.getBundleStats(bundleReceipt.bundleHash, targetBlockNumber);
-            console.log(`   Stats: ${JSON.stringify(stats, null, 2)}`);
+
+            // we cannot use stats, both getBundleStats and getBundleStatsV2 are not whitelisted.
+            // const stats = await flashbotsProvider.getBundleStatsV2(bundleReceipt.bundleHash, targetBlockNumber);
+            // console.log(`   Stats: ${JSON.stringify(stats, null, 2)}`);
         } else {
             console.log(`❓ Unexpected bundle resolution (${signedBundle.length} trx): ${waitResponse}`);
         }
