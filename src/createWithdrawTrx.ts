@@ -10,7 +10,7 @@ export interface WithdrawTrxResult {
     reason?: string;
 }
 
-export const createWithdrawTrx = async (amount?: bigint): Promise<WithdrawTrxResult> => {
+export const createWithdrawTrx = async (amount?: bigint, gasUsedTillNow?: bigint): Promise<WithdrawTrxResult> => {
     console.log("   💸 Creating ETH withdrawal transaction...");
     
     let currentBalance = amount;
@@ -21,13 +21,19 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<WithdrawTrxRes
     }
     
     const { maxFeePerGas, maxPriorityFeePerGas } = getGasInfo(); // 1.0x multiplier for Bundle1
-    const gasLimit = 50000n;
+    const gasLimit = 23000n;
     const estimatedGasCost = maxFeePerGas * gasLimit;
     const fundedAmount = parseUnits(ETH_AMOUNT_TO_FUND, "ether");
+
+    let prevGasCost = 0n;
+    if (gasUsedTillNow) {
+        prevGasCost = maxFeePerGas * gasUsedTillNow;
+    } else {
+        prevGasCost = maxFeePerGas * 100000n; // ERC20 transfer gas cost;
+    }
     
     // Calculate max amount to send back (funded amount + original balance - gas costs for this tx and ERC20 tx)
-    const erc20GasCost = maxFeePerGas * 100000n; // ERC20 transfer gas cost
-    const totalGasCosts = estimatedGasCost + erc20GasCost;
+    const totalGasCosts = estimatedGasCost + prevGasCost;
     const maxEthToSendBack = fundedAmount + currentBalance - totalGasCosts;
     
     console.log(`   📊 Transaction Details:`);
@@ -37,7 +43,7 @@ export const createWithdrawTrx = async (amount?: bigint): Promise<WithdrawTrxRes
     console.log(`      Funded Amount: ${formatEther(fundedAmount)} ETH`);
     console.log(`      Total Available: ${formatEther(fundedAmount + currentBalance)} ETH`);
     console.log(`      Gas Cost (This TX): ${formatEther(estimatedGasCost)} ETH`);
-    console.log(`      Gas Cost (ERC20 TX): ${formatEther(erc20GasCost)} ETH`);
+    console.log(`      Gas Cost (Previous TXs): ${formatEther(prevGasCost)} ETH`);
     console.log(`      Total Gas Costs: ${formatEther(totalGasCosts)} ETH`);
     console.log(`      Amount to Return: ${formatEther(maxEthToSendBack)} ETH`);
     console.log(`      Gas Limit: ${gasLimit.toLocaleString()}`);

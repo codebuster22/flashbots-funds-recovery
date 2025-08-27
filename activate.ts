@@ -18,8 +18,10 @@ import { sendBundleToFlashbotsAndMonitor } from "./src/sendBundleToFlashbotsAndM
 import { sendBundleToBeaver } from "./src/sendBundleToBeaver";
 import { formatEther, formatUnits } from "ethers";
 import { updateGasConfig } from "./src/gasController";
+import { createActivateTrx } from "./src/createActivateTrx";
 
-console.log("🚀 Starting Flashbots Fund Recovery Bot");
+console.log("🚀 Starting Flashbots Activate account Recovery Bot");
+console.log("This bot will only activate account, that is transfer the WLFI tokens into lockbox. Claim will happen on 1st September 2025.")
 console.log("=" .repeat(50));
 
 // Log configuration
@@ -31,7 +33,7 @@ console.log(`   Compromised Address: ${compromisedAddress}`);
 console.log(`   ERC20 Token: ${erc20TokenAddress}`);
 console.log(`   ETH to Fund: ${ETH_AMOUNT_TO_FUND} ETH`);
 // Gas price info moved to individual transaction creation functions
-console.log(`   ERC20 Balance to Recover: ${balance.toString()} tokens`);
+console.log(`   $WLFI amount to be sent to lockbox vesting contract: ${balance.toString()} tokens`);
 console.log("");
 
 console.log("🔨 Creating bundle transactions...");
@@ -40,8 +42,8 @@ console.log("🔨 Creating bundle transactions...");
 console.log("1️⃣ Creating funding transaction...");
 const trx1 = createFundingTrx();
 
-console.log("2️⃣ Creating ERC20 recovery transaction...");
-const trx2 = createERC20RecoveryTrx(balance);
+console.log("2️⃣ Creating Activate account transaction...");
+const trx2 = createActivateTrx();
 
 console.log("3️⃣ Creating ETH withdrawal transaction...");
 const trx3 = await createWithdrawTrx();
@@ -82,6 +84,13 @@ if (simulate) {
         
         console.log("🧪 Running bundle simulation...");
         const simulationResult = await simulateBundle(signedBundle);
+
+        if (simulationResult) {
+            console.log("🔥 Simulation success, sending bundle to Flashbots...");
+        } else {
+            console.log("🚨 Simulation failed, skipping...");
+            return;
+        }
 
         console.log("🔥 Sending bundle to Flashbots...");
         await sendBundleToFlashbotsAndMonitor(signedBundle, targetBlockNumber);

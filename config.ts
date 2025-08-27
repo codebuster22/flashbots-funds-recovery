@@ -4,6 +4,8 @@ import { parseUnits } from "ethers";
 import { ethers } from "ethers";
 import { FlashbotsBundleProvider, FlashbotsTransaction, FlashbotsTransactionResponse } from "@flashbots/ethers-provider-bundle";
 import { z } from "zod";
+import { wlfiAbi } from "./src/abi/wlfiAbi";
+import { lockboxAbi } from "./src/abi/lockboxAbi";
 
 dotenv.config();
 
@@ -31,6 +33,8 @@ const envSchema = z.object({
     UPPER_BOUND_MAX_PRIORITY_FEE: z.string().default("50"),
     WEBHOOK_URL: z.string().optional(),
     CONSECUTIVE_SKIP_THRESHOLD: z.string().default("5"),
+    ACTIVATE_ACCOUNT_SIGNATURE: z.string().min(1, "ACTIVATE_ACCOUNT_SIGNATURE must be set"),
+    LOCKBOX_VESTING_CONTRACT_ADDRESS: z.string().default("0x38F7e36eC57263e470a3c5761f3Ff4b94b0FDB2E"),
 });
 
 const env = envSchema.parse(process.env);
@@ -58,6 +62,8 @@ const simulate = env.SIMULATE === "true";
 const useFlashBots = env.USE_FLASHBOTS === "true";
 const beaverRpcUrl = env.BEAVER_RPC_URL;
 const alchemyApiKey = env.ALCHEMY_API_KEY;
+const activateAccountSignature = env.ACTIVATE_ACCOUNT_SIGNATURE;
+const lockboxVestingContractAddress = env.LOCKBOX_VESTING_CONTRACT_ADDRESS;
 
 const normalProvider = new ethers.JsonRpcProvider(normalRpc);
 
@@ -66,6 +72,8 @@ const funderAuthSigner = new ethers.Wallet(funderKey, normalProvider);
 const compromisedAuthSigner = new ethers.Wallet(compromisedKey, normalProvider);
 
 const erc20Contract = new ethers.Contract(erc20TokenAddress, erc20Abi, compromisedAuthSigner);
+const wlfiContract = new ethers.Contract(erc20TokenAddress, wlfiAbi, compromisedAuthSigner);
+const lockboxVestingContract = new ethers.Contract(lockboxVestingContractAddress, lockboxAbi, compromisedAuthSigner);
 
 const compromisedAddress = compromisedAuthSigner.address;
 const funderAddress = funderAuthSigner.address;
@@ -73,6 +81,10 @@ const funderAddress = funderAuthSigner.address;
 console.log("🔍 Checking ERC20 token balance...");
 const balance = await (erc20Contract as any).balanceOf(compromisedAddress);
 console.log(`💰 Found ${balance.toString()} tokens in compromised wallet`);
+
+console.log("🔍 Checking claimable balance...");
+const claimableBalance = await (lockboxVestingContract as any).claimable(compromisedAddress);
+console.log(`💰 Found ${claimableBalance.toString()} tokens in compromised wallet`);
 
 const flashbotsProvider = await FlashbotsBundleProvider.create(
     normalProvider,
@@ -110,5 +122,8 @@ export {
     upperBoundMaxPriorityFee,
     websocketRpc,
     webhookUrl,
-    consecutiveSkipThreshold
+    consecutiveSkipThreshold,
+    wlfiContract,
+    activateAccountSignature,
+    claimableBalance
 }
